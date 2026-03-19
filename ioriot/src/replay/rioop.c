@@ -17,6 +17,16 @@
 #include "../vfd.h"
 #include "rworker.h"
 
+typedef void (*rioop_handler_f)(rprocess_s *p, rthread_s *t, rtask_s *task);
+
+typedef struct {
+    int op;
+    rioop_handler_f handler;
+} rioop_entry_s;
+
+#define _RIOOP_ENTRY_COUNT(entries) \
+    (sizeof(entries) / sizeof((entries)[0]))
+
 // Printing error messages
 #define _Error(...) \
   fprintf(stderr, "%s:%d ERROR: ", __FILE__, __LINE__); \
@@ -70,136 +80,111 @@ _rioop_get_pwd(const char *user, struct passwd *pwd, char *buf,
     return result;
 }
 
+static void
+_rioop_noop(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    (void)p;
+    (void)t;
+    (void)task;
+}
+
+static void
+_rioop_open_default(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    rioop_open(p, t, task, -1);
+}
+
+static void
+_rioop_open_creat(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    rioop_open(p, t, task, O_CREAT|O_WRONLY|O_TRUNC);
+}
+
+static rioop_handler_f
+_rioop_find_handler(const rioop_entry_s *entries, const size_t num_entries,
+                    const int op)
+{
+    for (size_t i = 0; i < num_entries; ++i) {
+        if (entries[i].op == op)
+            return entries[i].handler;
+    }
+
+    return NULL;
+}
+
+static const rioop_entry_s _RIOOP_HANDLERS[] = {
+    {FSTAT, rioop_fstat},
+    {FSTATFS, _rioop_noop},
+    {FSTATFS64, _rioop_noop},
+    {FSTAT_AT, rioop_stat},
+    {LSTAT, rioop_stat},
+    {STAT, rioop_stat},
+    {STATFS, _rioop_noop},
+    {STATFS64, _rioop_noop},
+    {READ, rioop_read},
+    {READV, rioop_read},
+    {READAHEAD, _rioop_noop},
+    {READLINK, _rioop_noop},
+    {READLINK_AT, _rioop_noop},
+    {WRITE, rioop_write},
+    {WRITEV, rioop_write},
+    {OPEN, _rioop_open_default},
+    {OPEN_AT, _rioop_open_default},
+    {CREAT, _rioop_open_creat},
+    {MKDIR, rioop_mkdir},
+    {MKDIR_AT, rioop_mkdir},
+    {RENAME, rioop_rename},
+    {RENAME_AT, rioop_rename},
+    {RENAME_AT2, rioop_rename},
+    {CLOSE, rioop_close},
+    {UNLINK, rioop_unlink},
+    {UNLINK_AT, rioop_unlink},
+    {RMDIR, rioop_rmdir},
+    {FSYNC, rioop_fsync},
+    {FDATASYNC, rioop_fdatasync},
+    {SYNC, _rioop_noop},
+    {SYNCFS, _rioop_noop},
+    {SYNC_FILE_RANGE, _rioop_noop},
+    {FCNTL, rioop_fcntl},
+    {GETDENTS, rioop_getdents},
+    {LSEEK, rioop_lseek},
+    {LLSEEK, rioop_lseek},
+    {CHMOD, rioop_chmod},
+    {FCHMOD, rioop_fchmod},
+    {CHOWN, rioop_chown},
+    {FCHOWN, rioop_fchown},
+    {FCHOWNAT, rioop_fchown},
+    {LCHOWN, rioop_lchown},
+    {META_EXIT_GROUP, _rioop_noop},
+    {META_TIMELINE, _rioop_noop},
+};
+
+void rioop_test(void)
+{
+    const size_t handler_count = _RIOOP_ENTRY_COUNT(_RIOOP_HANDLERS);
+
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, OPEN) ==
+           _rioop_open_default);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, CREAT) ==
+           _rioop_open_creat);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READAHEAD) ==
+           _rioop_noop);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, -1) == NULL);
+}
+
 void rioop_run(rprocess_s *p, rthread_s *t, rtask_s *task)
 {
     _Init_op(2);
+    rioop_handler_f handler = _rioop_find_handler(_RIOOP_HANDLERS,
+                                                  _RIOOP_ENTRY_COUNT(
+                                                      _RIOOP_HANDLERS),
+                                                  op);
 
-    switch (op) {
-    // stat() syscalls
-    case FSTAT:
-        rioop_fstat(p, t, task);
-        break;
-    case FSTATFS:
-    case FSTATFS64:
-        //Error("op(%d) not implemented", op);
-        break;
-    case FSTAT_AT:
-    case LSTAT:
-    case STAT:
-        rioop_stat(p, t, task);
-        break;
-    case STATFS:
-    case STATFS64:
-        //Error("op(%d) not implemented", op);
-        break;
-
-    // read() syscalls
-    case READ:
-    case READV:
-        rioop_read(p, t, task);
-        break;
-    case READAHEAD:
-        //Error("op(%d) not implemented", op);
-        break;
-    case READLINK:
-    case READLINK_AT:
-        //Error("op(%d) not implemented", op);
-        break;
-
-    // write() syscalls
-    case WRITE:
-    case WRITEV:
-        rioop_write(p, t, task);
-        break;
-
-    // open() and other syscalls which may creat
-    case OPEN:
-    case OPEN_AT:
-        rioop_open(p, t, task, -1);
-        break;
-    case CREAT:
-        // A call to crat() is equivalent to calling open() with flags..
-        rioop_open(p, t, task, O_CREAT|O_WRONLY|O_TRUNC);
-        break;
-    case MKDIR:
-    case MKDIR_AT:
-        rioop_mkdir(p, t, task);
-        break;
-
-    // rename() syscalls
-    case RENAME:
-    case RENAME_AT:
-    case RENAME_AT2:
-        rioop_rename(p, t, task);
-        break;
-
-    // close() and unlink() syscalls
-    case CLOSE:
-        rioop_close(p, t, task);
-        break;
-    case UNLINK:
-    case UNLINK_AT:
-        rioop_unlink(p, t, task);
-        break;
-    case RMDIR:
-        rioop_rmdir(p, t, task);
-        break;
-
-    // sync() syscalls
-    case FSYNC:
-        rioop_fsync(p, t, task);
-        break;
-    case FDATASYNC:
-        rioop_fdatasync(p, t, task);
-        break;
-    case SYNC:
-    case SYNCFS:
-    case SYNC_FILE_RANGE:
-        //Error("op(%d) not implemented", op);
-        break;
-
-    // Other syscalls
-    case FCNTL:
-        rioop_fcntl(p, t, task);
-        break;
-    case GETDENTS:
-        rioop_getdents(p, t, task);
-        break;
-    case LSEEK:
-    case LLSEEK:
-        rioop_lseek(p, t, task);
-        break;
-
-    // chmod() syscalls
-    case CHMOD:
-        rioop_chmod(p, t, task);
-        break;
-    case FCHMOD:
-        rioop_fchmod(p, t, task);
-        break;
-
-    // chown() syscalls
-    case CHOWN:
-        rioop_chown(p, t, task);
-        break;
-    case FCHOWN:
-    case FCHOWNAT:
-        rioop_fchown(p, t, task);
-        break;
-    case LCHOWN:
-        rioop_lchown(p, t, task);
-        break;
-
-    // Meta operations (I/O replay internal use only).
-    case META_EXIT_GROUP:
-        break;
-    case META_TIMELINE:
-        break;
-
-    default:
+    if (handler == NULL) {
         Error("op(%d) not implemented", op);
-        break;
     }
+
+    handler(p, t, task);
 }
 
 void rioop_stat(rprocess_s *p, rthread_s *t, rtask_s *task)

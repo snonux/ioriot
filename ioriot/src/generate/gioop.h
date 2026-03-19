@@ -55,6 +55,7 @@ void gioop_close_all_vfd_cb(void *data, void *data2);
  * @return SUCCESS if everything went fine
  */
 status_e gioop_run(gwriter_s *w, gtask_s *t);
+void gioop_test(void);
 
 status_e gioop_open(gwriter_s *w, gtask_s *t, generate_s *g);
 status_e gioop_openat(gwriter_s *w, gtask_s *t, generate_s *g);

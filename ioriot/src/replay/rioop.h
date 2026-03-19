@@ -29,6 +29,7 @@
  * @param task The replay task object
  */
 void rioop_run(rprocess_s *p, rthread_s *t, rtask_s *task);
+void rioop_test(void);
 
 void rioop_close(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_fcntl(rprocess_s *p, rthread_s *t, rtask_s *task);

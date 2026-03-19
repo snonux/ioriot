@@ -14,9 +14,118 @@
 
 #include "gioop.h"
 
+typedef status_e (*gioop_handler_f)(gwriter_s *w, gtask_s *t, generate_s *g);
+
+typedef struct {
+    const char *op;
+    gioop_handler_f handler;
+} gioop_entry_s;
+
+#define _GIOOP_ENTRY_COUNT(entries) \
+    (sizeof(entries) / sizeof((entries)[0]))
+
+static status_e
+_gioop_ignore(gwriter_s *w, gtask_s *t, generate_s *g)
+{
+    (void)w;
+    (void)t;
+    (void)g;
+
+    return SUCCESS;
+}
+
+static gioop_handler_f
+_gioop_find_handler(const gioop_entry_s *entries, const size_t num_entries,
+                    const char *op)
+{
+    if (op == NULL)
+        return NULL;
+
+    for (size_t i = 0; i < num_entries; ++i) {
+        if (Eq(entries[i].op, op))
+            return entries[i].handler;
+    }
+
+    return NULL;
+}
+
+static const gioop_entry_s _GIOOP_PREOPEN[] = {
+    {"open", gioop_open},
+    {"openat", gioop_openat},
+    {"creat", gioop_creat},
+};
+
+static const gioop_entry_s _GIOOP_DISPATCH[] = {
+    {"close", gioop_close},
+    {"stat", gioop_stat},
+    {"statfs", gioop_statfs},
+    {"statfs64", gioop_statfs64},
+    {"fstat", gioop_fstat},
+    {"fstatat", gioop_fstatat},
+    {"fstatfs", gioop_fstatfs},
+    {"fstatfs64", gioop_fstatfs64},
+    {"rename", gioop_rename},
+    {"renameat", gioop_renameat},
+    {"renameat2", gioop_renameat2},
+    {"read", gioop_read},
+    {"readv", gioop_readv},
+    {"readahead", gioop_readahead},
+    {"readdir", gioop_readdir},
+    {"readlink", gioop_readlink},
+    {"readlinkat", gioop_readlinkat},
+    {"write", gioop_write},
+    {"writev", gioop_writev},
+    {"lseek", gioop_lseek},
+    {"llseek", gioop_llseek},
+    {"getdents", gioop_getdents},
+    {"mkdir", gioop_mkdir},
+    {"rmdir", gioop_rmdir},
+    {"mkdirat", gioop_mkdirat},
+    {"unlink", gioop_unlink},
+    {"unlinkat", gioop_unlinkat},
+    {"lstat", gioop_lstat},
+    {"fsync", gioop_fsync},
+    {"fdatasync", gioop_fdatasync},
+    {"sync", gioop_sync},
+    {"syncfs", gioop_syncfs},
+    {"sync_file_range", gioop_sync_file_range},
+    {"fcntl", gioop_fcntl},
+    {"mmap2", _gioop_ignore},
+    {"munmap", _gioop_ignore},
+    {"mremap", _gioop_ignore},
+    {"msync", _gioop_ignore},
+    {"chmod", gioop_chmod},
+    {"fchmodat", gioop_chmod},
+    {"fchmod", gioop_fchmod},
+    {"chown", gioop_chown},
+    {"chown16", gioop_chown},
+    {"lchown", gioop_lchown},
+    {"lchown16", gioop_lchown},
+    {"fchown", gioop_fchown},
+    {"fchownat", gioop_chown},
+    {"exit_group", gioop_exit_group},
+};
+
+void gioop_test(void)
+{
+    const size_t preopen_count = _GIOOP_ENTRY_COUNT(_GIOOP_PREOPEN);
+    const size_t dispatch_count = _GIOOP_ENTRY_COUNT(_GIOOP_DISPATCH);
+
+    assert(_gioop_find_handler(_GIOOP_PREOPEN, preopen_count, "open") ==
+           gioop_open);
+    assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, "close") ==
+           gioop_close);
+    assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, "msync") ==
+           _gioop_ignore);
+    assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, NULL) == NULL);
+    assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count,
+                               "definitely_unknown") == NULL);
+}
+
 status_e gioop_run(gwriter_s *w, gtask_s *t)
 {
     status_e ret = SUCCESS;
+    gioop_handler_f handler = NULL;
 
     // There was already an error in the parser (parser.c) processing this
     // task! Don't process it futher.
@@ -31,14 +140,11 @@ status_e gioop_run(gwriter_s *w, gtask_s *t)
     generate_gprocess_by_realpid(g, t);
 
     // One of the open syscalls may openes a file handle succesfully
-    if (Eq(t->op, "open")) {
-        Cleanup(gioop_open(w, t, g));
-
-    } else if (Eq(t->op, "openat")) {
-        Cleanup(gioop_openat(w, t, g));
-
-    } else if (Eq(t->op, "creat")) {
-        Cleanup(gioop_creat(w, t, g));
+    handler = _gioop_find_handler(_GIOOP_PREOPEN,
+                                  _GIOOP_ENTRY_COUNT(_GIOOP_PREOPEN),
+                                  t->op);
+    if (handler != NULL) {
+        Cleanup(handler(w, t, g));
     }
 
     // Get the virtual file descriptor of a given real fd and store a pointer
@@ -48,154 +154,14 @@ status_e gioop_run(gwriter_s *w, gtask_s *t)
         Cleanup_unless(SUCCESS, ret);
     }
 
-
-    if (Eq(t->op, "close")) {
-        Cleanup(gioop_close(w, t, g));
-
-    } else if (Eq(t->op, "stat")) {
-        Cleanup(gioop_stat(w, t, g));
-
-    } else if (Eq(t->op, "statfs")) {
-        Cleanup(gioop_statfs(w, t, g));
-
-    } else if (Eq(t->op, "statfs64")) {
-        Cleanup(gioop_statfs64(w, t, g));
-
-    } else if (Eq(t->op, "fstat")) {
-        Cleanup(gioop_fstat(w, t, g));
-
-    } else if (Eq(t->op, "fstatat")) {
-        Cleanup(gioop_fstatat(w, t, g));
-
-    } else if (Eq(t->op, "fstatfs")) {
-        Cleanup(gioop_fstatfs(w, t, g));
-
-    } else if (Eq(t->op, "fstatfs64")) {
-        Cleanup(gioop_fstatfs64(w, t, g));
-
-    } else if (Eq(t->op, "rename")) {
-        Cleanup(gioop_rename(w, t, g));
-
-    } else if (Eq(t->op, "renameat")) {
-        Cleanup(gioop_renameat(w, t, g));
-
-    } else if (Eq(t->op, "renameat2")) {
-        Cleanup(gioop_renameat2(w, t, g));
-
-    } else if (Eq(t->op, "read")) {
-        Cleanup(gioop_read(w, t, g));
-
-    } else if (Eq(t->op, "readv")) {
-        Cleanup(gioop_readv(w, t, g));
-
-    } else if (Eq(t->op, "readahead")) {
-        Cleanup(gioop_readahead(w, t, g));
-
-    } else if (Eq(t->op, "readdir")) {
-        Cleanup(gioop_readdir(w, t, g));
-
-    } else if (Eq(t->op, "readlink")) {
-        Cleanup(gioop_readlink(w, t, g));
-
-    } else if (Eq(t->op, "readlinkat")) {
-        Cleanup(gioop_readlinkat(w, t, g));
-
-    } else if (Eq(t->op, "write")) {
-        Cleanup(gioop_write(w, t, g));
-
-    } else if (Eq(t->op, "writev")) {
-        Cleanup(gioop_writev(w, t, g));
-
-    } else if (Eq(t->op, "lseek")) {
-        Cleanup(gioop_lseek(w, t, g));
-
-    } else if (Eq(t->op, "llseek")) {
-        Cleanup(gioop_llseek(w, t, g));
-
-    } else if (Eq(t->op, "getdents")) {
-        Cleanup(gioop_getdents(w, t, g));
-
-    } else if (Eq(t->op, "mkdir")) {
-        Cleanup(gioop_mkdir(w, t, g));
-
-    } else if (Eq(t->op, "rmdir")) {
-        Cleanup(gioop_rmdir(w, t, g));
-
-    } else if (Eq(t->op, "mkdirat")) {
-        Cleanup(gioop_mkdirat(w, t, g));
-
-    } else if (Eq(t->op, "unlink")) {
-        Cleanup(gioop_unlink(w, t, g));
-
-    } else if (Eq(t->op, "unlinkat")) {
-        Cleanup(gioop_unlinkat(w, t, g));
-
-    } else if (Eq(t->op, "lstat")) {
-        Cleanup(gioop_lstat(w, t, g));
-
-    } else if (Eq(t->op, "fsync")) {
-        Cleanup(gioop_fsync(w, t, g));
-
-    } else if (Eq(t->op, "fdatasync")) {
-        Cleanup(gioop_fdatasync(w, t, g));
-
-    } else if (Eq(t->op, "sync")) {
-        Cleanup(gioop_sync(w, t, g));
-
-    } else if (Eq(t->op, "syncfs")) {
-        Cleanup(gioop_syncfs(w, t, g));
-
-    } else if (Eq(t->op, "sync_file_range")) {
-        Cleanup(gioop_sync_file_range(w, t, g));
-
-    } else if (Eq(t->op, "fcntl")) {
-        Cleanup(gioop_fcntl(w, t, g));
-
-    } else if (Eq(t->op, "mmap2")) {
-        // Support for mmap added later
-
-    } else if (Eq(t->op, "munmap")) {
-        // Support for mmap added later
-
-    } else if (Eq(t->op, "mremap")) {
-        // Support for mmap added later
-
-    } else if (Eq(t->op, "msync")) {
-        // Support for mmap added later
-
-    } else if (Eq(t->op, "chmod")) {
-        Cleanup(gioop_chmod(w, t, g));
-
-    } else if (Eq(t->op, "fchmodat")) {
-        Cleanup(gioop_chmod(w, t, g));
-
-    } else if (Eq(t->op, "fchmod")) {
-        Cleanup(gioop_fchmod(w, t, g));
-
-    } else if (Eq(t->op, "chown")) {
-        Cleanup(gioop_chown(w, t, g));
-
-    } else if (Eq(t->op, "chown16")) {
-        Cleanup(gioop_chown(w, t, g));
-
-    } else if (Eq(t->op, "lchown")) {
-        Cleanup(gioop_lchown(w, t, g));
-
-    } else if (Eq(t->op, "lchown16")) {
-        Cleanup(gioop_lchown(w, t, g));
-
-    } else if (Eq(t->op, "fchown")) {
-        Cleanup(gioop_fchown(w, t, g));
-
-    } else if (Eq(t->op, "fchownat")) {
-        Cleanup(gioop_chown(w, t, g));
-
-    } else if (Eq(t->op, "exit_group")) {
-        Cleanup(gioop_exit_group(w, t, g));
-
-    } else {
-        Cleanup(ERROR;);
+    handler = _gioop_find_handler(_GIOOP_DISPATCH,
+                                  _GIOOP_ENTRY_COUNT(_GIOOP_DISPATCH),
+                                  t->op);
+    if (handler != NULL) {
+        Cleanup(handler(w, t, g));
     }
+
+    Cleanup(ERROR);
 
 cleanup:
 
