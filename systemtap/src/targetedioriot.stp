@@ -30,6 +30,7 @@ global PROBE_ENTRY_TIMES%[8096]
 global ENTRY_PATH%[8096]
 global ENTRY_PATH2%[8096]
 global ENTRY_FD%[8096]
+global ENTRY_FD2%[8096]
 global ENTRY_FLAGS%[8096]
 global ENTRY_MODE%[8096]
 global ENTRY_OFFSET%[8096]
@@ -64,6 +65,34 @@ function absolute_path:string (path:string) {
     return task_dentry_path(tc, pwd_dentry, pwd_mnt) . "/" . path;
 }
 
+function task_file_handle_d_path:string (task:long, fd:long) {
+    path = ""
+
+    try {
+        file = task_fd_lookup(task, fd)
+        if (file)
+            path = fullpath_struct_file(task, file)
+    } catch {
+    }
+
+    return path
+}
+
+function absolute_path_at:string (path:string, dirfd:long) {
+    if (substr(path,0,1) == "/")
+        return path;
+
+    if (dirfd == @const("AT_FDCWD"))
+        return absolute_path(path);
+
+    tc = task_current();
+    dir_path = task_file_handle_d_path(tc, dirfd);
+    if (strlen(dir_path) > 0)
+        return dir_path . "/" . path;
+
+    return absolute_path(path);
+}
+
 # Stop probing after 1h (for safety)
 probe timer.s(3600) {
     exit();
@@ -73,9 +102,9 @@ probe begin {
     printf("#|capture_version=%d|\n", 3);
 }
 
-# --- open/openat ---
+# --- open ---
 # Tapset entry vars: filename_unquoted, flags, mode
-probe syscall.open, syscall.openat {
+probe syscall.open {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
         ENTRY_PATH[tid(),name] = filename_unquoted
@@ -84,7 +113,7 @@ probe syscall.open, syscall.openat {
     }
 }
 
-probe syscall.open.return, syscall.openat.return {
+probe syscall.open.return {
     if (pid() == target()) {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,f=%d;:,m=%d;:,\n",
@@ -95,6 +124,36 @@ probe syscall.open.return, syscall.openat.return {
                 ENTRY_FLAGS[tid(),name],
                 ENTRY_MODE[tid(),name]);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
+        delete ENTRY_MODE[tid(),name]
+    }
+}
+
+# --- openat ---
+# Tapset entry vars: dfd, filename_unquoted, flags, mode
+probe syscall.openat {
+    if (pid() == target()) {
+        PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dfd
+        ENTRY_PATH[tid(),name] = filename_unquoted
+        ENTRY_FLAGS[tid(),name] = flags
+        ENTRY_MODE[tid(),name] = mode
+    }
+}
+
+probe syscall.openat.return {
+    if (pid() == target()) {
+        ns = gettimeofday_ns()
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,f=%d;:,m=%d;:,\n",
+                ns, ns-PROBE_ENTRY_TIMES[tid(),name],
+                pid(), tid(), name,
+                retval,
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
+                ENTRY_FLAGS[tid(),name],
+                ENTRY_MODE[tid(),name]);
+        delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
         delete ENTRY_PATH[tid(),name]
         delete ENTRY_FLAGS[tid(),name]
         delete ENTRY_MODE[tid(),name]
@@ -272,7 +331,7 @@ probe syscall.unlinkat.return {
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 ENTRY_FD[tid(),name],
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 ENTRY_FLAGS[tid(),name],
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
@@ -308,10 +367,12 @@ probe syscall.rename.return {
 }
 
 # --- renameat/renameat2 ---
-# Tapset entry vars: oldname_str_unquoted, newname_str_unquoted
+# Tapset entry vars: olddfd, oldname_str_unquoted, newdfd, newname_str_unquoted
 probe syscall.renameat, syscall.renameat2 {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = olddfd
+        ENTRY_FD2[tid(),name] = newdfd
         ENTRY_PATH[tid(),name] = oldname_str_unquoted
         ENTRY_PATH2[tid(),name] = newname_str_unquoted
     }
@@ -323,10 +384,14 @@ probe syscall.renameat.return, syscall.renameat2.return {
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,P=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
-                absolute_path(ENTRY_PATH[tid(),name]),
-                absolute_path(ENTRY_PATH2[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name],
+                                 ENTRY_FD[tid(),name]),
+                absolute_path_at(ENTRY_PATH2[tid(),name],
+                                 ENTRY_FD2[tid(),name]),
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_FD2[tid(),name]
         delete ENTRY_PATH[tid(),name]
         delete ENTRY_PATH2[tid(),name]
     }
@@ -427,10 +492,11 @@ probe syscall.readlink.return {
 }
 
 # --- readlinkat ---
-# Tapset entry vars: path_unquoted
+# Tapset entry vars: dfd, path_unquoted
 probe syscall.readlinkat {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dfd
         ENTRY_PATH[tid(),name] = path_unquoted
     }
 }
@@ -441,9 +507,10 @@ probe syscall.readlinkat.return {
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
         delete ENTRY_PATH[tid(),name]
     }
 }
@@ -650,7 +717,7 @@ probe syscall.mkdirat.return {
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 ENTRY_FD[tid(),name],
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 ENTRY_MODE[tid(),name],
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
@@ -788,7 +855,7 @@ probe syscall.fstatat.return {
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 ENTRY_FD[tid(),name],
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 ENTRY_FLAGS[tid(),name],
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
@@ -824,10 +891,11 @@ probe syscall.chmod.return {
 }
 
 # --- fchmodat ---
-# Tapset entry vars: pathname_unquoted, mode
+# Tapset entry vars: dirfd, pathname_unquoted, mode
 probe syscall.fchmodat {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dirfd
         ENTRY_PATH[tid(),name] = pathname_unquoted
         ENTRY_MODE[tid(),name] = mode
     }
@@ -839,10 +907,11 @@ probe syscall.fchmodat.return {
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,m=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 ENTRY_MODE[tid(),name],
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
         delete ENTRY_PATH[tid(),name]
         delete ENTRY_MODE[tid(),name]
     }
@@ -934,10 +1003,11 @@ probe syscall.fchown.return {
 }
 
 # --- fchownat ---
-# Tapset entry vars: pathname_unquoted, owner, group, flags
+# Tapset entry vars: dirfd, pathname_unquoted, owner, group, flags
 probe syscall.fchownat {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dirfd
         ENTRY_PATH[tid(),name] = pathname_unquoted
         ENTRY_OWNER[tid(),name] = owner
         ENTRY_GROUP[tid(),name] = group
@@ -951,12 +1021,13 @@ probe syscall.fchownat.return {
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,O=%d;:,G=%d;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
-                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
                 ENTRY_OWNER[tid(),name],
                 ENTRY_GROUP[tid(),name],
                 ENTRY_FLAGS[tid(),name],
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
         delete ENTRY_PATH[tid(),name]
         delete ENTRY_OWNER[tid(),name]
         delete ENTRY_GROUP[tid(),name]
