@@ -43,6 +43,9 @@ RUN set -eux; \
 		"kernel-devel-${kernel}" \
 		"kernel-debuginfo-${kernel}" \
 		"kernel-debuginfo-common-${arch}-${kernel}"; \
+	mkdir -p "/lib/modules/${kernel}"; \
+	ln -s "/usr/src/kernels/${kernel}" "/lib/modules/${kernel}/build"; \
+	ln -s "/usr/src/kernels/${kernel}" "/lib/modules/${kernel}/source"; \
 	dnf clean all
 
 WORKDIR /ioriot
