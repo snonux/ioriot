@@ -368,7 +368,7 @@ probe syscall.readahead {
 probe syscall.readahead.return {
     if(pid() == target()) {
         ns = gettimeofday_ns()
-        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,b=%ld;:,O=%ld;:,c=%ld\n",
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,b=%ld;:,O=%ld;:,c=%ld;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 ENTRY_FD[tid(),name],

@@ -46,8 +46,16 @@ char* strtok2_r(char *str, char *delim, char **saveptr)
 {
     int len = strlen(delim);
 
-    if (str == NULL)
+    if (str == NULL) {
+        if (*saveptr == NULL)
+            return NULL;
         str = *saveptr;
+    }
+
+    if (str[0] == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
 
     char *next = strstr(str, delim);
     if (next) {
@@ -58,7 +66,8 @@ char* strtok2_r(char *str, char *delim, char **saveptr)
         return str;
     }
 
-    return NULL;
+    *saveptr = NULL;
+    return str;
 }
 
 void chreplace(char *str, char replace, char with)
@@ -173,6 +182,18 @@ void start_pthread(pthread_t *thread, void*(*cb)(void*), void *data)
 
 void utils_test(void)
 {
+    char tokens_without_trailer[] = "t=1;:,c=2";
+    char *saveptr = NULL;
+    assert(Eq("t=1", strtok2_r(tokens_without_trailer, ";:,", &saveptr)));
+    assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
+    assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
+
+    char tokens_with_trailer[] = "t=1;:,c=2;:,";
+    saveptr = NULL;
+    assert(Eq("t=1", strtok2_r(tokens_with_trailer, ";:,", &saveptr)));
+    assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
+    assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
+
     if (getuid() == 0) {
         set_limits_drop_root("nobody");
         struct rlimit rl;
