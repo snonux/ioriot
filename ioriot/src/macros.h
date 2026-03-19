@@ -24,9 +24,9 @@
 #define Eq(str1,str2) strcmp(str1,str2) == 0
 
 // Number helpers
-#define Abs(num) num >= 0 ? num : -num
+#define Abs(num) ((num) >= 0 ? (num) : -(num))
 #define Readhex(str) strtol(str, NULL, 16)
-#define Perc(a, b) a > b ? b/(a/100.) : a/(b/100.)
+#define Perc(a, b) ((a) > (b) ? ((b) / ((a) / 100.)) : ((a) / ((b) / 100.)))
 
 // Bitwise helpers
 #define Has(flags, what) (flags & (what)) == (what)
@@ -38,7 +38,7 @@
 #define Calloc(count,what) \
     notnull(calloc(count,sizeof(what)),__FILE__,__LINE__,count)
 #define Mset(where,value,count,what) \
-    memset(where,value,count*sizeof(what))
+    memset((where), (value), ((count) * sizeof(what)))
 
 // Open helpers
 #define Fopen(path, mode) fnotnull(fopen(path, mode), path, __FILE__, __LINE__)
