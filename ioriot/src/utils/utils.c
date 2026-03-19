@@ -93,6 +93,9 @@ char* strtok2_r(char *str, char *delim, char **saveptr)
         str = *saveptr;
     }
 
+    while (str[0] == '\n' || str[0] == '\r')
+        str++;
+
     if (str[0] == '\0') {
         *saveptr = NULL;
         return NULL;
@@ -103,8 +106,22 @@ char* strtok2_r(char *str, char *delim, char **saveptr)
         next[0] = '\0';
         for (int i = 0; i < len; ++i)
             next++;
+        while (next[0] == '\n' || next[0] == '\r')
+            next++;
         *saveptr = next;
         return str;
+    }
+
+    int str_len = strlen(str);
+    while (str_len > 0 &&
+           (str[str_len-1] == '\n' || str[str_len-1] == '\r')) {
+        str[str_len-1] = '\0';
+        str_len--;
+    }
+
+    if (str[0] == '\0') {
+        *saveptr = NULL;
+        return NULL;
     }
 
     *saveptr = NULL;
@@ -226,6 +243,20 @@ void utils_test(void)
     char tokens_with_trailer[] = "t=1;:,c=2;:,";
     saveptr = NULL;
     assert(Eq("t=1", strtok2_r(tokens_with_trailer, ";:,", &saveptr)));
+    assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
+    assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
+
+    char tokens_without_trailer_newline[] = "t=1;:,c=2\n";
+    saveptr = NULL;
+    assert(Eq("t=1", strtok2_r(tokens_without_trailer_newline, ";:,",
+                               &saveptr)));
+    assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
+    assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
+
+    char tokens_with_trailer_newline[] = "t=1;:,c=2;:,\n";
+    saveptr = NULL;
+    assert(Eq("t=1", strtok2_r(tokens_with_trailer_newline, ";:,",
+                               &saveptr)));
     assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
     assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
 
