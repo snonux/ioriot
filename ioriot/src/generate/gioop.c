@@ -59,6 +59,15 @@ _gioop_creat_flags(const gtask_s *t)
     return O_CREAT | O_WRONLY | O_TRUNC;
 }
 
+static const char*
+_gioop_label(const gtask_s *t, const char *fallback)
+{
+    if (t != NULL && t->op != NULL)
+        return t->op;
+
+    return fallback;
+}
+
 static const gioop_entry_s _GIOOP_PREOPEN[] = {
     {"open", gioop_open},
     {"openat", gioop_openat},
@@ -112,6 +121,7 @@ static const gioop_entry_s _GIOOP_DISPATCH[] = {
     {"lchown", gioop_lchown},
     {"lchown16", gioop_lchown},
     {"fchown", gioop_fchown},
+    {"fchown16", gioop_fchown},
     {"fchownat", gioop_chown},
     {"exit_group", gioop_exit_group},
 };
@@ -138,6 +148,9 @@ void gioop_test(void)
     assert(_gioop_creat_flags(&task) == (O_CREAT | O_WRONLY | O_TRUNC));
     task.flags = O_RDONLY;
     assert(_gioop_creat_flags(&task) == O_RDONLY);
+    task.op = "lchown16";
+    assert(Eq(_gioop_label(&task, "fallback"), "lchown16"));
+    assert(Eq(_gioop_label(NULL, "fallback"), "fallback"));
 }
 
 status_e gioop_run(gwriter_s *w, gtask_s *t)
@@ -771,13 +784,16 @@ status_e gioop_fchmod(gwriter_s *w, gtask_s *t, generate_s *g)
 
 status_e gioop_chown(gwriter_s *w, gtask_s *t, generate_s *g)
 {
+    const char *label = _gioop_label(t, "chown");
+
     if (t->path == NULL) {
         return ERROR;
     }
 
     generate_vsize_by_path(g, t, NULL);
     // Hmm, maybe rename t->offset, because here it is used for the user UID
-    Gioop_write(CHOWN, "%s|%ld|%d|%d|chown", t->path, t->offset, t->G, t->status);
+    Gioop_write(CHOWN, "%s|%ld|%d|%d|%s",
+                t->path, t->offset, t->G, t->status, label);
 
     if (t->status == 0)
         vsize_stat(t->vsize, t->path);
@@ -787,26 +803,32 @@ status_e gioop_chown(gwriter_s *w, gtask_s *t, generate_s *g)
 
 status_e gioop_fchown(gwriter_s *w, gtask_s *t, generate_s *g)
 {
+    const char *label = _gioop_label(t, "fchown");
+
     if (!t->has_fd) {
         return ERROR;
     }
 
     generate_vsize_by_path(g, t, t->vfd->path);
     // Hmm, maybe rename t->offset, because here it is used for the user UID
-    Gioop_write(FCHOWN, "%ld|%ld|%d|%d|fchown", t->mapped_fd, t->offset, t->G, t->status);
+    Gioop_write(FCHOWN, "%ld|%ld|%d|%d|%s",
+                t->mapped_fd, t->offset, t->G, t->status, label);
 
     return SUCCESS;
 }
 
 status_e gioop_lchown(gwriter_s *w, gtask_s *t, generate_s *g)
 {
+    const char *label = _gioop_label(t, "lchown");
+
     if (t->path == NULL) {
         return ERROR;
     }
 
     generate_vsize_by_path(g, t, NULL);
     // Hmm, maybe rename t->offset, because here it is used for the user UID
-    Gioop_write(LCHOWN, "%s|%ld|%d|%d|chown", t->path, t->offset, t->G, t->status);
+    Gioop_write(LCHOWN, "%s|%ld|%d|%d|%s",
+                t->path, t->offset, t->G, t->status, label);
 
     if (t->status == 0)
         vsize_stat(t->vsize, t->path);

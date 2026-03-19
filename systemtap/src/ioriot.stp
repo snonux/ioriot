@@ -944,9 +944,12 @@ probe syscall.fchmod.return {
 
 # --- chown/lchown ---
 # Tapset entry vars: path_unquoted, owner, group
-# Note: chown16/lchown16 do not exist on x86_64
+# Compat note: 64-bit workloads use chown/lchown, while 32-bit compat
+# workloads may emit chown16/lchown16 on the same kernel.
 probe syscall.chown,
-      syscall.lchown {
+      syscall.chown16,
+      syscall.lchown,
+      syscall.lchown16 {
     if (execname() != "stapio") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
         ENTRY_PATH[tid(),name] = path_unquoted
@@ -956,7 +959,9 @@ probe syscall.chown,
 }
 
 probe syscall.chown.return,
-      syscall.lchown.return {
+      syscall.chown16.return,
+      syscall.lchown.return,
+      syscall.lchown16.return {
     if(execname() != "stapio") {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,O=%d;:,G=%d;:,s=%d;:,\n",
@@ -975,8 +980,10 @@ probe syscall.chown.return,
 
 # --- fchown ---
 # Tapset entry vars: fd, owner, group
-# Note: fchown16 does not exist on x86_64
-probe syscall.fchown {
+# Compat note: 64-bit workloads use fchown, while 32-bit compat workloads may
+# emit fchown16 on the same kernel.
+probe syscall.fchown,
+      syscall.fchown16 {
     if (execname() != "stapio") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
         ENTRY_FD[tid(),name] = fd
@@ -985,7 +992,8 @@ probe syscall.fchown {
     }
 }
 
-probe syscall.fchown.return {
+probe syscall.fchown.return,
+      syscall.fchown16.return {
     if(execname() != "stapio") {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%ld;:,O=%d;:,G=%d;:,s=%d;:,\n",

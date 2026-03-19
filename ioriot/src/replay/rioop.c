@@ -100,6 +100,19 @@ _rioop_open_creat(rprocess_s *p, rthread_s *t, rtask_s *task)
     rioop_open(p, t, task, O_CREAT|O_WRONLY|O_TRUNC);
 }
 
+static DIR*
+_rioop_get_dir_stream(vfd_s *vfd)
+{
+    if (vfd == NULL)
+        return NULL;
+
+    if (vfd->dirfd != NULL)
+        return vfd->dirfd;
+
+    vfd->dirfd = fdopendir(vfd->fd);
+    return vfd->dirfd;
+}
+
 static rioop_handler_f
 _rioop_find_handler(const rioop_entry_s *entries, const size_t num_entries,
                     const int op)
@@ -147,14 +160,18 @@ static const rioop_entry_s _RIOOP_HANDLERS[] = {
     {SYNC_FILE_RANGE, _rioop_noop},
     {FCNTL, rioop_fcntl},
     {GETDENTS, rioop_getdents},
+    {READDIR, rioop_readdir},
     {LSEEK, rioop_lseek},
     {LLSEEK, rioop_lseek},
     {CHMOD, rioop_chmod},
     {FCHMOD, rioop_fchmod},
     {CHOWN, rioop_chown},
+    {CHOWN16, rioop_chown},
     {FCHOWN, rioop_fchown},
+    {FCHOWN16, rioop_fchown},
     {FCHOWNAT, rioop_fchown},
     {LCHOWN, rioop_lchown},
+    {LCOWN16, rioop_lchown},
     {META_EXIT_GROUP, _rioop_noop},
     {META_TIMELINE, _rioop_noop},
 };
@@ -169,6 +186,8 @@ void rioop_test(void)
            _rioop_open_creat);
     assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READAHEAD) ==
            _rioop_noop);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READDIR) ==
+           rioop_readdir);
     assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, -1) == NULL);
 }
 
@@ -320,16 +339,25 @@ void rioop_getdents(rprocess_s *p, rthread_s *t, rtask_s *task)
     _Init_fd(3);
     _Init_virtfd;
 
-    // getdents expects a dirfd
-    DIR *dirfd = fdopendir(vfd->fd);
-    if (dirfd) {
-        vfd->dirfd = dirfd;
+    // Directory readers reuse the same DIR* stream so offsets stay aligned.
+    DIR *dirfd = _rioop_get_dir_stream(vfd);
+    if (dirfd != NULL) {
         readdir(dirfd);
 #ifdef THREAD_DEBUG
         fprintf(t->rthread_fd, "TRACE OPEN|fdopendir|%s|\n", vfd->path);
         fflush(t->rthread_fd);
 #endif
     }
+}
+
+void rioop_readdir(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_fd(3);
+    _Init_virtfd;
+
+    DIR *dirfd = _rioop_get_dir_stream(vfd);
+    if (dirfd != NULL)
+        readdir(dirfd);
 }
 
 void rioop_mkdir(rprocess_s *p, rthread_s *t, rtask_s *task)

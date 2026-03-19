@@ -40,6 +40,7 @@ void rioop_getdents(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_mkdir(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_open(rprocess_s *p, rthread_s *t, rtask_s *task, int flags_);
 void rioop_read(rprocess_s *p, rthread_s *t, rtask_s *task);
+void rioop_readdir(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_rename(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_stat(rprocess_s *p, rthread_s *t, rtask_s *task);
 void rioop_lseek(rprocess_s *p, rthread_s *t, rtask_s *task);

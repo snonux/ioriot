@@ -246,3 +246,17 @@ attempts to exercise these operations:
 If the generated replay only contains the header and `#INIT`, or the replay
 paths escape the intended test tree, investigate capture tokenization and
 dirfd-relative path handling first.
+
+## Legacy Compat Syscalls
+
+The normal helper above exercises the current x86_64 syscall surface. For
+legacy compat names that only show up through the 32-bit ABI on this host,
+use [scripts/syscall_compat32.c](/home/paul/git/ioriot/scripts/syscall_compat32.c)
+and compile it with `cc -m32`.
+
+- It reuses the same `PID_FILE GO_FILE BASE_DIR USER` contract as the main
+  matrix helper, so the capture/generate/init/replay procedure above applies
+  unchanged.
+- It covers `readdir`, `llseek`, `statfs64`, `fstatfs64`, `chown16`,
+  `lchown16`, and `fchown16`.
+- Run it with a user whose uid/gid fit into the legacy 16-bit chown ABI.
