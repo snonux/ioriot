@@ -65,6 +65,7 @@ rworker_s* rworker_new(const int rworker_num, amap_s *fds_map,
 
     pthread_mutex_init(&w->rthread_buffer_mutex, NULL);
     pthread_mutex_init(&w->task_buffer_mutex, NULL);
+    pthread_mutex_init(&w->fds_map_mutex, NULL);
 
     // TODO: Check in the program whether the ulimit is high enough
     // or not! (ulimit -n)
@@ -101,6 +102,7 @@ void rworker_destroy(rworker_s *w)
 
     pthread_mutex_destroy(&w->task_buffer_mutex);
     pthread_mutex_destroy(&w->rthread_buffer_mutex);
+    pthread_mutex_destroy(&w->fds_map_mutex);
 
 #ifdef THREAD_DEBUG
     if (w->rworker_fd)

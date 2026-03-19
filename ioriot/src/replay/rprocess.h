@@ -31,7 +31,7 @@ typedef struct rprocess_s_ {
     int pid; /**< The virtual process ID */
     unsigned long lineno; /**< Holding the current .replay line number */
     bool initm; /**< Indicates whether ioriot is in init mode or not */
-    amap_s *fds_map; /**< Holding all file descriptors */
+    amap_s *fds_map; /**< Shared worker-wide file descriptors map */
 } rprocess_s;
 
 rprocess_s* rprocess_new(const int pid, amap_s *fds_map);

@@ -273,8 +273,11 @@ void rioop_open(rprocess_s *p, rthread_s *t, rtask_s *task, int flags_)
     }
 
     if (fd > 0 && ret > 0) {
+        rworker_s *w = t->worker;
         vfd_s *vfd = vfd_new(ret, fd, path);
+        pthread_mutex_lock(&w->fds_map_mutex);
         amap_set(p->fds_map, fd, vfd);
+        pthread_mutex_unlock(&w->fds_map_mutex);
 
 #ifdef THREAD_DEBUG
         fprintf(t->rthread_fd, "TRACE OPEN|open|%s|\n", path);
@@ -286,9 +289,16 @@ void rioop_open(rprocess_s *p, rthread_s *t, rtask_s *task, int flags_)
 void rioop_close(rprocess_s *p, rthread_s *t, rtask_s *task)
 {
     _Init_fd(3);
-    _Init_virtfd;
+    rworker_s *w = t->worker;
+    // Lookup lifetime still relies on the per-FD ownership invariant.
+    pthread_mutex_lock(&w->fds_map_mutex);
+    vfd_s *vfd = amap_get(p->fds_map, fd);
+    if (vfd != NULL)
+        amap_unset(p->fds_map, fd);
+    pthread_mutex_unlock(&w->fds_map_mutex);
+    if (vfd == NULL)
+        return;
 
-    amap_unset(p->fds_map, fd);
     if (vfd->dirfd) {
         closedir(vfd->dirfd);
 #ifdef THREAD_DEBUG

@@ -34,6 +34,7 @@
 typedef struct {
     int rworker_num; /**< The current worker ID */
     amap_s* fds_map; /**< Holding all file descriptors */
+    pthread_mutex_t fds_map_mutex; /**< Sync access to the shared fds_map */
     amap_s* rprocess_map; /**< Holding all processes handled by this worker */
     amap_s* rthread_map; /**< Holding all threads handled by this worker */
     rbuffer_s *task_buffer; /**< Buffering thread tasks to be reused */
