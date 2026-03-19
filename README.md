@@ -4,15 +4,17 @@
 
 <img src=doc/ioriot_small.png align=right />
 
-...is an I/O benchmarking tool for Linux based operating systems which captures I/O operations on a (possibly production) server in order to replay the exact same I/O operations on a load test machine.
+...is an I/O benchmarking tool for Linux systems which captures file-I/O
+operations on one host and replays the same workload on another host or test
+environment.
 
-I/O Riot is operated in 5 steps:
+I/O Riot is normally operated in 5 steps:
 
 1. Capture: Record all I/O operations over a given period of time to a capture log.
-2. Initialize: Copy the log to a load test machine and initialize the load test environment.
-3. Replay: Drop all OS caches and replay all I/O operations.
-4. Analyze: Look at the OS and hardware stats (throughput, I/O ops, load average) from the run phase and draw conclusions. The aim is to identify possible I/O bottlenecks.
-5. Repeat: Repeat steps 2-4 multiple times but adjust OS and hardware settings in order to improve I/O performance.
+2. Generate: Transform the `.capture` log into a `.replay` file with replay-local paths and metadata.
+3. Initialize: Create the directory, file, and symlink skeleton required for replay.
+4. Replay: Optionally drop caches and replay the recorded workload with configurable worker and thread parallelism.
+5. Analyze and repeat: Inspect replay stats and storage behavior, then rerun with different hardware, file-system, or tuning choices.
 
 Examples of OS and hardware settings and adjustments:
 
@@ -53,73 +55,85 @@ Future work will also include file hole support and I/O support for memory mappe
 
 I/O Riot depends on SystemTap and a compatible version of the Linux Kernel. To get started have a read through the [installation guide](doc/markdown/installation.md).
 
+Once the prerequisites are in place, the normal build and install flow is:
+
+```bash
+make clean all test
+sudo make install
+```
+
 # How to use I/O Riot
 
 Check out the [I/O Riot usage guide](doc/markdown/usage.md) for a full usage workflow demonstration.
+
+The current CLI workflow is:
+
+```bash
+# Capture all supported file I/O, or target a specific PID with -x
+sudo /opt/ioriot/bin/ioriot -c io.capture [-x PID]
+
+# Generate a replay file from the capture log
+sudo /opt/ioriot/bin/ioriot -c io.capture -r io.replay -u "$USER" -n test1 \
+  -w /home/"$USER"/.ioriot-wd
+
+# Initialize the replay tree
+sudo /opt/ioriot/bin/ioriot -i io.replay -w /home/"$USER"/.ioriot-wd
+
+# Replay the workload
+sudo /opt/ioriot/bin/ioriot -r io.replay -S stats.txt
+```
+
+Notes:
+
+* Targeted capture (`-x PID`) automatically uses `targetedioriot.ko` unless `-m` overrides the module name.
+* Replay data is created under per-test directories such as `/home/.ioriot/<name>/...`.
+* Captured symlink targets are rewritten to replay-local relative paths, and replay refuses to create symlinks that would resolve outside the corresponding replay tree.
 
 # Appendix
 
 ## Supported file systems
 
-Currently I/O Riot supports replaying I/O on ``ext2``, ``ext3``, ``ext4`` and ``xfs``. However, it should be straightforward add additional file systems. 
+Replay path rewriting currently recognizes `ext2`, `ext4`, `xfs`, `zfs`, and
+`btrfs` mount points.
 
 ## Supported syscalls
 
-Currently, these file I/O related syscalls are supported (as of CentOS 7):
+The generator and replay engine currently support these operations end to end
+on the native syscall surface:
 
-```code
-open
-openat
-lseek
-llseek
-fcntl
-creat
-write
-writev
-unlink
-unlinkat
-rename
-renameat
-renameat2
-read
-readv
-readahead - Initial support only
-readdir
-readlink
-readlinkat
-fdatasync
-fsync
-sync_file_range - Initial support only
-sync
-syncfs
+```text
+open, openat, creat
 close
-getdents
-mkdir
-rmdir
-mkdirat
-stat
-statfs - Initial support only
-statfs64 - Initial support only
-fstatfs - Initial support only
-fstatfs64 - Initial support only
-lstat
-fstat
-fstatat
-chmod
-fchmodat
-fchmod
-chown
-chown16
-lchown
-lchown16
-fchown
-fchown16
-fchownat
-mmap2 - Initial support only
-mremap - Initial support only
-munmap - Initial support only
-msync - Initial support only
-exit_group - To detect process termination (closing all open file handles)
+lseek
+fcntl
+read, readv, readahead
+write, writev
+stat, lstat, fstat, fstatat
+statfs, fstatfs
+readdir, getdents
+readlink, readlinkat
+rename, renameat, renameat2
+unlink, unlinkat, rmdir
+mkdir, mkdirat
+fsync, fdatasync, sync, syncfs, sync_file_range
+chmod, fchmod, fchmodat
+chown, lchown, fchown, fchownat
+```
+
+Additional legacy compat syscall names are supported when they are captured via
+the 32-bit ABI on a compatible host:
+
+```text
+llseek
+statfs64, fstatfs64
+chown16, lchown16, fchown16
+```
+
+The capture layer also records some mmap-related operations, but they are still
+ignored during replay generation:
+
+```text
+mmap2, mremap, munmap, msync
 ```
 
 ## Source code documentation
