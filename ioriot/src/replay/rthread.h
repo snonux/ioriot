@@ -44,7 +44,7 @@ typedef struct rthread_s_ {
     void *worker; /**< The responsible worker object */
     long tid; /**< The virtual thread id */
     rbuffer_s* tasks; /**< Holds all outstanding tasks */
-    bool terminate; /**< True if thread shall terminate */
+    volatile bool terminate; /**< True if thread shall terminate */
     bool single_threaded; /**< Worker is single threaded or not */
     pthread_t pthread; /**< We run the tasks in concurrent pthreads */
 #ifdef RTHREAD_DEBUG
