@@ -143,8 +143,7 @@ status_e generate_run(options_s *opts)
         gtask_init(t, line, g->lineno);
 
         // ...pass it to the parser queue
-        while (!rbuffer_insert(parser->queue, t))
-            usleep(100);
+        rbuffer_insert_wait(parser->queue, t, 100);
 
         if (g->lineno % 1000000 == 0) {
             Out(" %lu (filtered:%.2lf%%)", g->lineno, _Perc_filtered);

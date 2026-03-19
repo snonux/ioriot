@@ -76,6 +76,18 @@ void rbuffer_destroy(rbuffer_s* r);
 bool rbuffer_insert(rbuffer_s* r, void *data);
 
 /**
+ * @brief Inserts data pointer to the ring buffer, waiting for space
+ *
+ * This helper preserves backpressure on correctness-critical queue handoffs by
+ * retrying until the insert succeeds.
+ *
+ * @param r The ring buffer object
+ * @param data The data pointer
+ * @param sleep_us The retry delay in microseconds
+ */
+void rbuffer_insert_wait(rbuffer_s* r, void *data, const useconds_t sleep_us);
+
+/**
  * @brief Determines whether there is any data in the ring buffer
  *
  * @param r The ring buffer object

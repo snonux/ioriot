@@ -29,14 +29,14 @@ void* gparser_pthread_start(void *data)
             // First extract
             gparser_extract(p, t);
             // Second, pass the task to the writer thread
-            rbuffer_insert(w->queue, t);
+            rbuffer_insert_wait(w->queue, t, 100);
         }
         usleep(100);
     } while (!p->terminate);
 
     while (NULL != (t = rbuffer_get_next(p->queue))) {
         gparser_extract(p, t);
-        rbuffer_insert(w->queue, t);
+        rbuffer_insert_wait(w->queue, t, 100);
     }
 
     return NULL;

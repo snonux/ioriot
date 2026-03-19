@@ -48,6 +48,14 @@ bool rbuffer_insert(rbuffer_s* r, void *data)
     return true;
 }
 
+void rbuffer_insert_wait(rbuffer_s* r, void *data, const useconds_t sleep_us)
+{
+    Error_if(sleep_us == 0, "Expected retry delay to be greater than zero");
+
+    while (!rbuffer_insert(r, data))
+        usleep(sleep_us);
+}
+
 bool rbuffer_has_next(rbuffer_s* r)
 {
     sig_atomic_t read_pos = (r->read_pos+1) % r->size;
@@ -90,6 +98,22 @@ void rbuffer_print(rbuffer_s* r)
             Out("%d:%p ", i, r->ring[i]);
         }
     Out("\n");
+}
+
+typedef struct {
+    rbuffer_s *buffer;
+    useconds_t sleep_us;
+    long expected;
+} rbuffer_test_drain_s;
+
+static void *_rbuffer_test_drain_one(void *data)
+{
+    rbuffer_test_drain_s *d = data;
+
+    usleep(d->sleep_us);
+    assert(d->expected == (long) rbuffer_get_next(d->buffer));
+
+    return NULL;
 }
 
 void rbuffer_test(void)
@@ -141,6 +165,28 @@ void rbuffer_test(void)
     assert(4 == (long) rbuffer_get_next(r));
     rbuffer_print(r);
     assert(5 == (long) rbuffer_get_next(r));
+    assert(NULL == rbuffer_get_next(r));
+
+    rbuffer_destroy(r);
+
+    r = rbuffer_new(3);
+    assert(rbuffer_insert(r, (void*)1));
+    assert(rbuffer_insert(r, (void*)2));
+    assert(!rbuffer_insert(r, (void*)3));
+
+    rbuffer_test_drain_s drain = {
+        .buffer = r,
+        .sleep_us = 1000,
+        .expected = 1,
+    };
+    pthread_t drain_thread;
+    start_pthread(&drain_thread, _rbuffer_test_drain_one, &drain);
+
+    rbuffer_insert_wait(r, (void*)3, 100);
+    pthread_join(drain_thread, NULL);
+
+    assert(2 == (long) rbuffer_get_next(r));
+    assert(3 == (long) rbuffer_get_next(r));
     assert(NULL == rbuffer_get_next(r));
 
     rbuffer_destroy(r);
