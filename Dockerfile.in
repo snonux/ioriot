@@ -1,10 +1,24 @@
-FROM centos:7
+FROM rockylinux:9
 
-RUN sed -i 's/enabled=0/enabled=1/' /etc/yum.repos.d/CentOS-{Vault,Debuginfo}.repo
-RUN yum install -y gcc systemtap yum-utils wget
-ENV kernel KERNEL
-RUN yum install -y kernel-${kernel} kernel-devel-${kernel}
-RUN debuginfo-install -y kernel-${kernel}
+ENV kernel=KERNEL
+
+RUN case "${kernel}" in \
+	*.el9*) ;; \
+	*) echo "KERNEL must be a Rocky Linux 9 kernel release, for example 5.14.0-611.36.1.el9_7.x86_64"; exit 1 ;; \
+	esac
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+		dnf-plugins-core \
+		gcc \
+		make \
+		systemtap \
+		wget && \
+	dnf config-manager --set-enabled baseos-debug && \
+	dnf install -y --setopt=install_weak_deps=False \
+		kernel-devel-${kernel} \
+		kernel-debuginfo-${kernel} \
+		kernel-debuginfo-common-$(uname -m)-${kernel} && \
+	dnf clean all
 
 WORKDIR /ioriot
 ADD ./ /ioriot

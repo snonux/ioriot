@@ -21,7 +21,11 @@ doxygen:
 	doxygen ./doc/doxygen.conf
 test:
 	$(MAKE) -C ioriot test
-dockerbuild:
+checkdockerkernel:
+	case "$(KERNEL)" in *.el9*) ;; \
+	*) echo "KERNEL must be set to a Rocky Linux 9 kernel release, e.g. make dockerbuild KERNEL=5.14.0-611.36.1.el9_7.x86_64"; exit 1 ;; \
+	esac
+dockerbuild: checkdockerkernel
 	bash -c 'test ! -d $(PWD)/docker/opt/ && mkdir -p $(PWD)/docker/opt/; exit 0'
 	bash -c 'test -f /etc/fedora-release && sudo chcon -Rt svirt_sandbox_file_t $(PWD)/docker/opt; exit 0'
 	bash -c 'test -f /etc/centos-release && sudo chcon -Rt svirt_sandbox_file_t $(PWD)/docker/opt; exit 0'
@@ -31,7 +35,7 @@ dockerbuild:
 	docker run -v $(PWD)/docker/opt:/opt -e 'KERNEL=$(KERNEL)' -it ioriot:$(KERNEL) make all test install
 dockerclean:
 	bash -c 'test -d $(PWD)/docker && rm -Rfv $(PWD)/docker; exit 0'
-jenkins:
+jenkins: checkdockerkernel
 	bash -c 'test ! -d $(PWD)/docker/opt/ && mkdir -p $(PWD)/docker/opt/; exit 0'
 	bash -c 'test -f /etc/fedora-release && sudo chcon -Rt svirt_sandbox_file_t $(PWD)/docker/opt; exit 0'
 	bash -c 'test -f /etc/centos-release && sudo chcon -Rt svirt_sandbox_file_t $(PWD)/docker/opt; exit 0'

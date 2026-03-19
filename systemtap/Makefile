@@ -1,7 +1,7 @@
 KERNEL ?= $(shell uname -r)
-PROCESSOR ?= $(shell uname -p)
+PROCESSOR ?= $(shell uname -m)
 DESTDIR ?= /opt/ioriot/systemtap/$(KERNEL)
-UPDATEURI = http://debuginfo.centos.org/7/$(PROCESSOR)
+UPDATEURI ?= https://download.rockylinux.org/pub/rocky/9/BaseOS/$(PROCESSOR)/debug/tree/Packages/k
 DOWNLOADIR ?= ./downloads
 all: prepare compile
 prepare:
@@ -36,8 +36,7 @@ debuginfodownload:
 	test -f $(DOWNLOADIR)/kernel-debuginfo-common-$(PROCESSOR)-$(KERNEL).rpm || \
 		wget -P $(DOWNLOADIR) $(UPDATEURI)/kernel-debuginfo-common-$(PROCESSOR)-$(KERNEL).rpm
 debuginfolocalinstall:
-	#yum remove kernel-debuginfo kernel-debuginfo-common-$(PROCESSOR)
-	yum localinstall $(DOWNLOADIR)/kernel-debuginfo-common-$(PROCESSOR)-$(KERNEL).rpm \
+	dnf install -y $(DOWNLOADIR)/kernel-debuginfo-common-$(PROCESSOR)-$(KERNEL).rpm \
 		$(DOWNLOADIR)/kernel-debuginfo-$(KERNEL).rpm
 todo:
 	fgrep TODO ./src/*
