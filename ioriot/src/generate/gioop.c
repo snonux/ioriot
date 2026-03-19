@@ -491,8 +491,12 @@ status_e gioop_readlink(gwriter_s *w, gtask_s *t, generate_s *g)
     generate_vsize_by_path(g, t, NULL);
     Gioop_write(READLINK, "%s|%d|readlink", t->path, t->status);
 
-    if (t->status == 0)
-        vsize_stat(t->vsize, t->path);
+    if (t->status >= 0) {
+        if (t->path2 != NULL)
+            vsize_symlink(t->vsize, t->path, t->path2);
+        else
+            vsize_stat(t->vsize, t->path);
+    }
 
     return SUCCESS;
 }
@@ -506,8 +510,12 @@ status_e gioop_readlinkat(gwriter_s *w, gtask_s *t, generate_s *g)
     generate_vsize_by_path(g, t, NULL);
     Gioop_write(READLINK_AT, "%s|%d|readlinkat", t->path, t->status);
 
-    if (t->status == 0)
-        vsize_stat(t->vsize, t->path);
+    if (t->status >= 0) {
+        if (t->path2 != NULL)
+            vsize_symlink(t->vsize, t->path, t->path2);
+        else
+            vsize_stat(t->vsize, t->path);
+    }
 
     return SUCCESS;
 }

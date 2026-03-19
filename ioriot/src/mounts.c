@@ -19,6 +19,139 @@
 #define _PATH_INSERT "/.ioriot/"
 #define _PATH_INSERT_LEN 11 // strlen of _PATH_INSERT
 
+static char*
+_mounts_normalize_path(const char *path)
+{
+    char *tmp = NULL;
+
+    if (path == NULL)
+        return NULL;
+
+    if (!strstr(path, "..") && !strstr(path, "//"))
+        return Clone(path);
+
+    tmp = Calloc(strlen(path) + 1, char);
+
+    stack_s *s = stack_new();
+    char *clone = Clone(path);
+    char *saveptr = NULL;
+    char *tok = strtok_r(clone, "/", &saveptr);
+
+    while (tok) {
+        if (strcmp(tok, "..") == 0) {
+            stack_pop(s);
+        } else if (strcmp(tok, ".") != 0 && strlen(tok) > 0) {
+            stack_push(s, tok);
+        }
+        tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+    if (stack_is_empty(s)) {
+        strcpy(tmp, ".");
+    } else {
+        s = stack_new_reverse_from(s);
+        strcpy(tmp, "/");
+        strcat(tmp, (char*)stack_pop(s));
+
+        while (!stack_is_empty(s)) {
+            strcat(tmp, "/");
+            strcat(tmp, (char*)stack_pop(s));
+        }
+    }
+
+    stack_destroy(s);
+    free(clone);
+
+    return tmp;
+}
+
+static char*
+_mounts_replay_root_from_transformed(const char *path, const char *name)
+{
+    char *marker = NULL;
+    char *root = NULL;
+    char *pos = NULL;
+
+    if (asprintf(&marker, "%s%s", _PATH_INSERT, name) == -1) {
+        Error("Could not allocate replay root marker");
+    }
+
+    pos = strstr(path, marker);
+    if (pos == NULL) {
+        free(marker);
+        return NULL;
+    }
+
+    int root_len = (pos - path) + strlen(marker);
+    root = Calloc(root_len + 1, char);
+    strncpy(root, path, root_len);
+    root[root_len] = '\0';
+
+    free(marker);
+    return root;
+}
+
+static char*
+_mounts_relative_path(const char *from_dir, const char *to_path)
+{
+    char *from = Clone(from_dir);
+    char *to = Clone(to_path);
+    char *from_parts[1024];
+    char *to_parts[1024];
+    int from_count = 0;
+    int to_count = 0;
+    int common = 0;
+    char *saveptr = NULL;
+    char *tok = NULL;
+    char *result = NULL;
+    size_t size = 2;
+
+    tok = strtok_r(from, "/", &saveptr);
+    while (tok && from_count < 1024) {
+        from_parts[from_count++] = tok;
+        tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+    saveptr = NULL;
+    tok = strtok_r(to, "/", &saveptr);
+    while (tok && to_count < 1024) {
+        to_parts[to_count++] = tok;
+        tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+    while (common < from_count && common < to_count &&
+           Eq(from_parts[common], to_parts[common])) {
+        common++;
+    }
+
+    for (int i = common; i < from_count; ++i)
+        size += 3;
+    for (int i = common; i < to_count; ++i)
+        size += strlen(to_parts[i]) + 1;
+
+    result = Calloc(size, char);
+
+    if (common == from_count && common == to_count) {
+        strcpy(result, ".");
+        goto cleanup;
+    }
+
+    for (int i = common; i < from_count; ++i)
+        strcat(result, "../");
+
+    for (int i = common; i < to_count; ++i) {
+        if (strlen(result) > 0 && result[strlen(result) - 1] != '/')
+            strcat(result, "/");
+        strcat(result, to_parts[i]);
+    }
+
+cleanup:
+    free(from);
+    free(to);
+
+    return result;
+}
+
 void mounts_read(mounts_s *m)
 {
     char *mounts = "/proc/mounts";
@@ -288,49 +421,8 @@ bool mounts_transform_path(mounts_s *m, const char *name,
     // transform '/foo/bar/../' into '/foo/'.
     // Also remove double '/' from paths.
 
-    if (strstr(path, "..") || strstr(path, "//")) {
-        // tmp will be freed under label 'cleanup' at end of function.
-        tmp = Calloc(strlen(path)+1, char);
-
-        // stack to put the tokens on
-        stack_s *s = stack_new();
-
-        // we need a copy of the path, so we can tokenize it into the stack
-        char* clone = Clone(path);
-
-        char *saveptr = NULL;
-        char *tok = strtok_r(clone, "/", &saveptr);
-
-        // Add each part of the path to the stack.
-        while (tok) {
-            if (strcmp(tok, "..") == 0) {
-                stack_pop(s);
-            } else {
-                stack_push(s, tok);
-            }
-            tok = strtok_r(NULL, "/", &saveptr);
-        }
-
-        if (stack_is_empty(s)) {
-            strcpy(tmp, ".");
-
-        } else {
-            s = stack_new_reverse_from(s);
-            strcpy(tmp, "/");
-            strcat(tmp, (char*)stack_pop(s));
-
-            while(!stack_is_empty(s)) {
-                strcat(tmp, "/");
-                strcat(tmp, (char*)stack_pop(s));
-            }
-        }
-
-        stack_destroy(s);
-        free(clone);
-
-        // This is the path without '..' and '//' (and '///' ... etc')
-        path = tmp;
-    }
+    tmp = _mounts_normalize_path(path);
+    path = tmp;
 
     // Now heck whether the path is on a supported file system. If not, ignore!
     if (mounts_ignore_path(m, path)) {
@@ -384,6 +476,64 @@ cleanup:
         free(tmp);
 
     return line_ok;
+}
+
+bool mounts_transform_symlink_target(mounts_s *m, const char *name,
+                                     const char *link_path,
+                                     const char *link_path_r,
+                                     const char *target,
+                                     char **target_r)
+{
+    bool ok = false;
+    char *target_abs = NULL;
+    char *target_path_r = NULL;
+    char *link_root = NULL;
+    char *target_root = NULL;
+    char *link_dir = NULL;
+
+    if (link_path == NULL || link_path_r == NULL || target == NULL)
+        return false;
+
+    if (target[0] == '/') {
+        target_abs = _mounts_normalize_path(target);
+    } else {
+        char *dir = dirname_r(Clone(link_path));
+        char *joined = NULL;
+        if (asprintf(&joined, "%s/%s", dir, target) == -1) {
+            Error("Could not allocate symlink target path");
+        }
+        target_abs = _mounts_normalize_path(joined);
+        free(joined);
+        free(dir);
+    }
+
+    if (!mounts_transform_path(m, name, target_abs, &target_path_r))
+        goto cleanup;
+
+    link_root = _mounts_replay_root_from_transformed(link_path_r, name);
+    target_root = _mounts_replay_root_from_transformed(target_path_r, name);
+    if (link_root == NULL || target_root == NULL || !Eq(link_root, target_root))
+        goto cleanup;
+
+    link_dir = dirname_r(Clone(link_path_r));
+    *target_r = _mounts_relative_path(link_dir, target_path_r);
+    ok = (*target_r != NULL);
+
+cleanup:
+    if (!ok && target_r)
+        *target_r = NULL;
+    if (target_abs)
+        free(target_abs);
+    if (target_path_r)
+        free(target_path_r);
+    if (link_root)
+        free(link_root);
+    if (target_root)
+        free(target_root);
+    if (link_dir)
+        free(link_dir);
+
+    return ok;
 }
 
 int mounts_get_mountnumber(mounts_s *m, const char *path)

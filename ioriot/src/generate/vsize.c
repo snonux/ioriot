@@ -17,8 +17,19 @@
 #include "generate.h"
 
 // Helper macros
-#define _Set_file(v) v->is_file = true; v->unsure = v->is_dir = false
-#define _Set_dir(v) v->is_dir = true; v->unsure = v->is_file = false
+#define _Set_file(v) \
+    v->is_file = true; \
+    v->is_link = false; \
+    v->unsure = v->is_dir = false
+#define _Set_dir(v) \
+    v->is_dir = true; \
+    v->is_link = false; \
+    v->unsure = v->is_file = false
+#define _Set_link(v) \
+    v->is_link = true; \
+    v->is_dir = false; \
+    v->is_file = false; \
+    v->unsure = false
 #define _Set_unsure(v) v->unsure = true
 #define _Set_inserted(v) v->inserted = true
 #define _Set_renamed(v) v->renamed = true
@@ -34,6 +45,8 @@ vsize_s* vsize_new(char *file_path, const unsigned long id,
     v->inserted = false;
     v->is_dir = false;
     v->is_file = false;
+    v->is_link = false;
+    v->link_target = NULL;
     v->path = Clone(file_path);
     v->renamed = false;
     v->required = false;
@@ -56,6 +69,8 @@ void vsize_destroy(vsize_s *v)
     if (v->write_ranges)
         btree_destroy(v->write_ranges);
 
+    if (v->link_target)
+        free(v->link_target);
     free(v->path);
     free(v);
 }
@@ -145,6 +160,21 @@ void vsize_stat(vsize_s *v, const char *path)
         _Set_unsure(v);
         v->updates++;
     }
+}
+
+void vsize_symlink(vsize_s *v, const char *path, const char *target)
+{
+    if (v->updates == 0) {
+        init_parent_dir(v, path);
+    }
+
+    if (v->link_target)
+        free(v->link_target);
+
+    v->link_target = Clone(target);
+    _Set_required(v);
+    _Set_link(v);
+    v->updates++;
 }
 
 void vsize_rename(vsize_s *v, vsize_s *v2,

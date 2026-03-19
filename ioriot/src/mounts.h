@@ -138,6 +138,27 @@ bool mounts_ignore_path(mounts_s *m, const char *path);
 bool mounts_transform_path(mounts_s *m, const char *name,
                            char *path, char **path_r);
 
+/**
+ * @brief Rewrites a symlink target into a replay-local relative target
+ *
+ * The returned target is always relative to the replay symlink location and
+ * is only produced when both link and target stay inside the same replay
+ * root.
+ *
+ * @param m The responsible mountpoint object
+ * @param name The name of the test
+ * @param link_path The original absolute symlink path from capture
+ * @param link_path_r The transformed replay symlink path
+ * @param target The raw readlink target captured from the host
+ * @param target_r The safe replay-local relative target
+ * @return False if the target can not be rewritten safely
+ */
+bool mounts_transform_symlink_target(mounts_s *m, const char *name,
+                                     const char *link_path,
+                                     const char *link_path_r,
+                                     const char *target,
+                                     char **target_r);
+
 
 /**
  * @brief Get's the mount point number of a path

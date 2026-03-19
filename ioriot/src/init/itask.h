@@ -23,9 +23,11 @@
 typedef struct itask_s_ {
     bool is_dir;
     bool is_file;
+    bool is_link;
     long offset;
     long bytes;
     char *path;
+    char *target;
     long dirs_created;
     long files_created;
     long sizes_created;

@@ -99,7 +99,7 @@ probe timer.s(3600) {
 }
 
 probe begin {
-    printf("#|capture_version=%d|\n", 3);
+    printf("#|capture_version=%d|\n", 4);
 }
 
 # --- open ---
@@ -470,48 +470,60 @@ probe syscall.readdir.return {
 }
 
 # --- readlink ---
-# Tapset entry vars: path_unquoted
+# Tapset entry vars: path_unquoted, buf_uaddr
 probe syscall.readlink {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
         ENTRY_PATH[tid(),name] = path_unquoted
+        ENTRY_ADDR[tid(),name] = buf_uaddr
     }
 }
 
 probe syscall.readlink.return {
     if(pid() == target()) {
         ns = gettimeofday_ns()
-        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
+        target = ""
+        if (retval > 0)
+            target = user_string_n(ENTRY_ADDR[tid(),name], retval)
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,P=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 absolute_path(ENTRY_PATH[tid(),name]),
+                target,
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
         delete ENTRY_PATH[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
     }
 }
 
 # --- readlinkat ---
-# Tapset entry vars: dfd, path_unquoted
+# Tapset entry vars: dfd, path_unquoted, buf_uaddr
 probe syscall.readlinkat {
     if (pid() == target()) {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
         ENTRY_FD[tid(),name] = dfd
         ENTRY_PATH[tid(),name] = path_unquoted
+        ENTRY_ADDR[tid(),name] = buf_uaddr
     }
 }
 
 probe syscall.readlinkat.return {
     if(pid() == target()) {
         ns = gettimeofday_ns()
-        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
+        target = ""
+        if (retval > 0)
+            target = user_string_n(ENTRY_ADDR[tid(),name], retval)
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,P=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
                 pid(), tid(), name,
                 absolute_path_at(ENTRY_PATH[tid(),name], ENTRY_FD[tid(),name]),
+                target,
                 retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
         delete ENTRY_FD[tid(),name]
         delete ENTRY_PATH[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
     }
 }
 

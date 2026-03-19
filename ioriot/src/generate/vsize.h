@@ -30,6 +30,7 @@
  */
 typedef struct vsize_s_ {
     char *path; /**< The path to the file/directory */
+    char *link_target; /**< Relative replay-local symlink target */
     long bytes; /**< The virtual size */
     btree_s *read_ranges; /**< Used to store used data ranges in a file with holes */
     btree_s *write_ranges; /**< Used to store used data ranges in a file with holes */
@@ -39,6 +40,7 @@ typedef struct vsize_s_ {
     bool required; /**< True if init mode will create this file/dir */
     bool is_dir; /**< True if this file/dir is a directory */
     bool is_file; /**< True if this file/dir is a regular file */
+    bool is_link; /**< True if this path is a symbolic link */
     bool unsure; /**< True if the file type is not fully clear */
     long updates; /**< Amount of times this vsize has been updated */
     bool inserted; /**< For debugging purposes only */
@@ -112,6 +114,15 @@ void vsize_close(vsize_s *v, void *vfd);
 void vsize_stat(vsize_s *v, const char *path);
 
 /**
+ * @brief Adjust vsize on readlink
+ *
+ * @param v The virtual size object
+ * @param path The symlink path
+ * @param target The safe replay-local relative target
+ */
+void vsize_symlink(vsize_s *v, const char *path, const char *target);
+
+/**
  * @brief Adjust vsize on rename
  *
  * @param v The virtual size object
@@ -176,4 +187,3 @@ void vsize_rmdir(vsize_s *v, const char *path);
 void vsize_unlink(vsize_s *v, const char *path);
 
 #endif // VSIZE_H
-

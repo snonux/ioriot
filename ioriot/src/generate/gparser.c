@@ -74,6 +74,7 @@ void gparser_extract(gparser_s *p, gtask_s *t)
 {
     status_e ret = SUCCESS;
     generate_s *g = p->generate;
+    char *original_path = NULL;
 
     char *saveptr;
     char* tok = strtok2_r(t->line, ";:,", &saveptr);
@@ -108,6 +109,7 @@ void gparser_extract(gparser_s *p, gtask_s *t)
         // run multiple tests simoultaneously.
 
         if (t->path) {
+            original_path = Clone(t->path);
             if (!mounts_transform_path(g->mps, g->name,
                                        t->path, &t->path_r)) {
                 Cleanup(ERROR);
@@ -117,12 +119,23 @@ void gparser_extract(gparser_s *p, gtask_s *t)
         }
 
         if (t->path2) {
-            if (!mounts_transform_path(g->mps, g->name,
-                                       t->path2, &t->path2_r)) {
-                Cleanup(ERROR);
+            if (Eq(t->op, "readlink") || Eq(t->op, "readlinkat")) {
+                if (original_path && t->path &&
+                    mounts_transform_symlink_target(g->mps, g->name,
+                                                    original_path, t->path,
+                                                    t->path2, &t->path2_r)) {
+                    t->path2 = t->path2_r;
+                } else {
+                    t->path2 = NULL;
+                }
+            } else {
+                if (!mounts_transform_path(g->mps, g->name,
+                                           t->path2, &t->path2_r)) {
+                    Cleanup(ERROR);
+                }
+                if (t->path2_r)
+                    t->path2 = t->path2_r;
             }
-            if (t->path2_r)
-                t->path2 = t->path2_r;
         }
 
     }
@@ -134,6 +147,9 @@ cleanup:
 #ifdef LOG_FILTERED
     t->filtered_where = __FILE__;
 #endif
+
+    if (original_path)
+        free(original_path);
 }
 
 status_e gparser_extract_tok(gparser_s *p, gtask_s *t, char *tok)

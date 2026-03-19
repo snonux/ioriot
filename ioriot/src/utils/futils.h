@@ -35,6 +35,20 @@ char* dirname_r(char *path);
 int ensure_file_exists(char *path, long *num_dirs_created);
 
 /**
+ * @brief Ensures that a replay-local relative symlink exists
+ *
+ * The target must be relative and must resolve inside the same replay root as
+ * the symlink itself.
+ *
+ * @param path The symlink path
+ * @param target The relative symlink target
+ * @param num_dirs_created Holds a count of how many sub dirs have been created
+ * @return -1 on error, 0 on success.
+ */
+int ensure_relative_symlink_exists(char *path, const char *target,
+                                   long *num_dirs_created);
+
+/**
  * @brief Checks whether path exists
  *
  * @param path The path

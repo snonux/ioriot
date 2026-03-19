@@ -116,10 +116,11 @@ status_e init_run(options_s *opts)
     // Seek to the INIT section
     fseeko(i->replay_fd, init_offset, SEEK_SET);
 
-    bool is_file = false, is_dir = false;
+    bool is_file = false, is_dir = false, is_link = false;
     long offset = 0;
     long bytes = 0;
     char *path;
+    char *target = NULL;
 
     // Stats
     long dirs_created = 0;
@@ -137,6 +138,14 @@ status_e init_run(options_s *opts)
 
     while ((read = getline(&line, &len, i->replay_fd)) != -1) {
         //Debug(line);
+        is_dir = false;
+        is_file = false;
+        is_link = false;
+        offset = 0;
+        bytes = 0;
+        path = NULL;
+        target = NULL;
+
         char *tok = strtok_r(line, "|", &saveptr);
 
         for (int ntok = 0; tok; ntok++) {
@@ -148,19 +157,25 @@ status_e init_run(options_s *opts)
                 is_file = atoi(tok) == 1;
                 break;
             case 2:
+                is_link = atoi(tok) == 1;
+                break;
+            case 3:
                 offset = atol(tok);
                 if (offset < 0) {
                     Error("Offset overflow: '%ld'", offset);
                 }
                 break;
-            case 3:
+            case 4:
                 bytes = atol(tok);
                 if (bytes < 0) {
                     Error("Size overflow: '%ld'", bytes);
                 }
                 break;
-            case 4:
+            case 5:
                 path = tok;
+                break;
+            case 6:
+                target = tok;
                 break;
             default:
                 break;
@@ -183,12 +198,17 @@ status_e init_run(options_s *opts)
         if (is_dir) {
             task->is_dir = true;
 
+        } else if (is_link) {
+            task->is_link = true;
+
         } else if (is_file) {
             task->is_file = true;
             task->bytes = bytes;
             task->offset = offset;
         }
         task->path = Clone(path);
+        if (task->is_link && target)
+            task->target = Clone(target);
 
         // We run one init thread per mount point
         int mnr = mounts_get_mountnumber(i->mounts, path);

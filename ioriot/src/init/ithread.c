@@ -85,6 +85,12 @@ void ithread_run_task(ithread_s *t, itask_s *task)
     if (task->is_dir) {
         task->dirs_created += ensure_dir_exists(task->path);
 
+    } else if (task->is_link) {
+        if (!ensure_relative_symlink_exists(task->path, task->target,
+                                            &task->dirs_created)) {
+            task->files_created++;
+        }
+
     } else if (task->is_file) {
         if (!ensure_file_exists(task->path, &task->dirs_created)) {
             task->files_created++;

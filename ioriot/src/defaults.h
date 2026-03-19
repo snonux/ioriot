@@ -18,9 +18,9 @@
 #include "utils/utils.h"
 
 /** Version of the supported .capture format */
-#define CAPTURE_VERSION 3
+#define CAPTURE_VERSION 4
 /** Version of the supported .replay format */
-#define REPLAY_VERSION 2
+#define REPLAY_VERSION 3
 /** Meta header key for the supported .replay format version */
 #define REPLAY_VERSION_KEY "replay_version"
 /** Max amount of tokens per line in the .capture file */

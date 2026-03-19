@@ -19,6 +19,7 @@ itask_s* itask_new()
     itask_s *task = Malloc(itask_s);
 
     task->path = NULL;
+    task->target = NULL;
     itask_reset_stats(task);
 
     return task;
@@ -28,19 +29,25 @@ void itask_destroy(itask_s *task)
 {
     if (task->path)
         free(task->path);
+    if (task->target)
+        free(task->target);
 
     free(task);
 }
 
 void itask_reset_stats(itask_s *task)
 {
-    task->is_dir = task->is_file = false;
+    task->is_dir = task->is_file = task->is_link = false;
     task->sizes_created = task->offset = task->bytes = 0;
     task->dirs_created = task->files_created = 0;
 
     if (task->path) {
         free(task->path);
         task->path = NULL;
+    }
+    if (task->target) {
+        free(task->target);
+        task->target = NULL;
     }
 }
 
@@ -60,7 +67,8 @@ void itask_extract_stats(itask_s *task, long* dirs_created, long *files_created,
 
 void itask_print(itask_s *task)
 {
-    Put("itask(%p): is_dir:%d is_file:%d offset:%ld bytes:%ld path:%s",
-        (void*)task, task->is_dir, task->is_file,
-        task->offset, task->bytes, task->path);
+    Put("itask(%p): is_dir:%d is_file:%d is_link:%d offset:%ld bytes:%ld "
+        "path:%s target:%s",
+        (void*)task, task->is_dir, task->is_file, task->is_link,
+        task->offset, task->bytes, task->path, task->target);
 }

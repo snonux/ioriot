@@ -212,8 +212,8 @@ void _write_ranges_cb(long start, void *data, void *data2)
     long end = (long) data;
     long bytes = end-start;
     if (bytes > 0) {
-        fprintf(g->replay_fd, "%d|%d|%ld|%ld|%s|\n",
-                v->is_dir, v->is_file, start, bytes, v->path);
+        fprintf(g->replay_fd, "%d|%d|%d|%ld|%ld|%s|\n",
+                v->is_dir, v->is_file, v->is_link, start, bytes, v->path);
     }
 }
 
@@ -223,11 +223,16 @@ void generate_write_init_cb(void *data)
     generate_s *g = v->generate;
 
     if (v->required && strlen(v->path) > 0) {
-        if (v->read_ranges) {
+        if (v->is_link && v->link_target) {
+            fprintf(g->replay_fd, "%d|%d|%d|%ld|%ld|%s|%s|\n",
+                    v->is_dir, v->is_file, v->is_link,
+                    0L, 0L, v->path, v->link_target);
+        } else if (v->read_ranges) {
             btree_run_cb2(v->read_ranges, _write_ranges_cb, data);
         } else if (v->bytes >= 0) {
-            fprintf(g->replay_fd, "%d|%d|%ld|%ld|%s|\n",
-                    v->is_dir, v->is_file, 0L, v->bytes, v->path);
+            fprintf(g->replay_fd, "%d|%d|%d|%ld|%ld|%s|\n",
+                    v->is_dir, v->is_file, v->is_link,
+                    0L, v->bytes, v->path);
         }
     }
 }

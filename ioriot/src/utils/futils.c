@@ -21,6 +21,87 @@
 
 #include "../macros.h"
 
+static char*
+_normalize_path(const char *path)
+{
+    if (path == NULL)
+        return NULL;
+
+    char *copy = Clone(path);
+    char *parts[1024];
+    int count = 0;
+    bool absolute = (path[0] == '/');
+    char *saveptr = NULL;
+    char *tok = strtok_r(copy, "/", &saveptr);
+
+    while (tok && count < 1024) {
+        if (strcmp(tok, "..") == 0) {
+            if (count > 0)
+                count--;
+        } else if (strcmp(tok, ".") != 0 && strlen(tok) > 0) {
+            parts[count++] = tok;
+        }
+        tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+    size_t len = absolute ? 2 : 1;
+    for (int i = 0; i < count; ++i)
+        len += strlen(parts[i]) + 1;
+
+    char *normalized = Calloc(len, char);
+
+    if (absolute)
+        strcpy(normalized, "/");
+
+    for (int i = 0; i < count; ++i) {
+        if (strlen(normalized) > 0 &&
+            normalized[strlen(normalized) - 1] != '/') {
+            strcat(normalized, "/");
+        }
+        strcat(normalized, parts[i]);
+    }
+
+    if (strlen(normalized) == 0)
+        strcpy(normalized, absolute ? "/" : ".");
+
+    free(copy);
+    return normalized;
+}
+
+static char*
+_replay_root_from_path(const char *path)
+{
+    const char *marker = "/.ioriot/";
+    char *pos = strstr(path, marker);
+    char *next = NULL;
+    char *root = NULL;
+
+    if (pos == NULL)
+        return NULL;
+
+    next = strchr(pos + strlen(marker), '/');
+    if (next == NULL)
+        return NULL;
+
+    int root_len = next - path;
+    root = Calloc(root_len + 1, char);
+    strncpy(root, path, root_len);
+    root[root_len] = '\0';
+
+    return root;
+}
+
+static bool
+_path_within_dir(const char *path, const char *dir)
+{
+    int len = strlen(dir);
+
+    if (strncmp(path, dir, len) != 0)
+        return false;
+
+    return (path[len] == '\0' || path[len] == '/');
+}
+
 void _write_random_to_stream(FILE *fp, unsigned long bytes)
 {
     char *buf = NULL;
@@ -150,6 +231,56 @@ int ensure_file_exists(char *path, long *num_dirs_created)
     }
 
     return ERROR;
+}
+
+int ensure_relative_symlink_exists(char *path, const char *target,
+                                   long *num_dirs_created)
+{
+    if (target == NULL || target[0] == '\0' || target[0] == '/')
+        return ERROR;
+
+    char *dirname = dirname_r(Clone(path));
+    *num_dirs_created += ensure_dir_exists(dirname);
+
+    char *joined = NULL;
+    if (asprintf(&joined, "%s/%s", dirname, target) == -1) {
+        free(dirname);
+        Error("Could not allocate symlink target path");
+    }
+
+    char *resolved = _normalize_path(joined);
+    char *root = _replay_root_from_path(path);
+    free(joined);
+
+    if (root == NULL || !_path_within_dir(resolved, root)) {
+        free(dirname);
+        free(resolved);
+        if (root)
+            free(root);
+        return ERROR;
+    }
+
+    struct stat path_stat;
+    if (lstat(path, &path_stat) == 0) {
+        if (S_ISDIR(path_stat.st_mode)) {
+            free(dirname);
+            free(resolved);
+            free(root);
+            return ERROR;
+        }
+        unlink(path);
+    }
+
+    int ret = symlink(target, path);
+
+    free(dirname);
+    free(resolved);
+    free(root);
+
+    if (ret == -1)
+        return ERROR;
+
+    return SUCCESS;
 }
 
 char* dirname_r(char *path)

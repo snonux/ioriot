@@ -41,10 +41,15 @@ workload.
 - Run from the repository root: `/home/paul/git/ioriot`.
 - Use a base directory under `/home`, not `/tmp`. This project filters some
   file systems during replay generation, and `/tmp` may be `tmpfs`.
+- Keep the helper base directory and test name short. The checked-in syscall
+  helpers use fixed-size `readlink()` buffers, so overly long absolute paths
+  can truncate the captured symlink target and turn a valid replay check into a
+  false failure.
 - The helper below is intentionally dirfd-heavy so it catches path-resolution
   bugs in `*at` syscalls as well as normal file I/O.
-- `readdir` is intentionally excluded. Generation handles it, but replay does
-  not currently have a `READDIR` implementation.
+- The main helper exercises the native x86_64 syscall surface. Use the compat32
+  helper below when you need the legacy 32-bit ABI names such as `readdir`,
+  `llseek`, `statfs64`, and the `*chown16` family.
 
 ### 1. Rebuild, test, and install
 
@@ -95,6 +100,10 @@ sudo /opt/ioriot/bin/ioriot -c "$capture_file" -x "$helper_pid"
 ```
 
 Wait until `staprun` reports that `targetedioriot.ko` has been inserted.
+Then give the module a short settling delay before releasing the helper, for
+example `sleep 2`. On this host, releasing the workload immediately after the
+inserted message can miss the first burst of syscalls and produce a nearly
+empty `.capture`.
 
 ### 5. Release the helper and stop capture after it exits
 
