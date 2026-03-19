@@ -27,7 +27,7 @@ void replay_extract_header(options_s *opts, FILE *replay_fd, long *num_vsizes,
     meta_read_start(m);
 
     long version = 0;
-    if (meta_read_l(m, "version", &version)) {
+    if (meta_read_l(m, REPLAY_VERSION_KEY, &version)) {
         Put("Replay version is '%ld'", version);
         if (version != REPLAY_VERSION) {
             Error(".replay file of incompatible version, got %x, expected %x",
@@ -76,6 +76,48 @@ void replay_extract_header(options_s *opts, FILE *replay_fd, long *num_vsizes,
     }
 
     meta_destroy(m);
+}
+
+void replay_test(void)
+{
+    FILE *replay_fd = tmpfile();
+    assert(replay_fd != NULL);
+
+    meta_s *meta = meta_new(replay_fd);
+    meta_reserve(meta);
+    meta_write_start(meta);
+    meta_write_l(meta, REPLAY_VERSION_KEY, REPLAY_VERSION);
+    meta_write_s(meta, "user", "metauser");
+    meta_write_s(meta, "name", "metatest");
+    meta_write_l(meta, "num_vsizes", 11);
+    meta_write_l(meta, "num_mapped_pids", 22);
+    meta_write_l(meta, "num_mapped_fds", 33);
+    meta_write_l(meta, "num_lines", 44);
+    meta_destroy(meta);
+
+    rewind(replay_fd);
+    meta = meta_new(replay_fd);
+    meta_read_start(meta);
+    long wrong_version = -1;
+    assert(!meta_read_l(meta, "version", &wrong_version));
+    meta_destroy(meta);
+
+    rewind(replay_fd);
+    options_s opts = {0};
+    long num_vsizes = 0, num_pids = 0, num_fds = 0, num_lines = 0;
+    replay_extract_header(&opts, replay_fd, &num_vsizes, &num_pids, &num_fds,
+                          &num_lines);
+
+    assert(num_vsizes == 11);
+    assert(num_pids == 22);
+    assert(num_fds == 33);
+    assert(num_lines == 44);
+    assert(Eq(opts.user, "metauser"));
+    assert(Eq(opts.name, "metatest"));
+
+    free(opts.user);
+    free(opts.name);
+    fclose(replay_fd);
 }
 
 status_e replay_run(options_s *opts)

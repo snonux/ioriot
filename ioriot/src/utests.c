@@ -19,6 +19,7 @@
 #include "datas/hmap.h"
 #include "datas/list.h"
 #include "datas/rbuffer.h"
+#include "replay/replay.h"
 #include "utils/utils.h"
 
 void utests_run()
@@ -37,6 +38,9 @@ void utests_run()
 
     fprintf(stderr, "Running utils_test()\n");
     utils_test();
+
+    fprintf(stderr, "Running replay_test()\n");
+    replay_test();
 
     //fprintf(stderr, "Running amap_test()\n");
     //amap_test();

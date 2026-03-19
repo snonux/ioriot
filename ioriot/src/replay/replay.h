@@ -43,4 +43,9 @@ status_e replay_run(options_s *opts);
 void replay_extract_header(options_s *opts, FILE *replay_fd, long *num_vsizes,
                            long *num_pids, long *num_fds,long *num_lines);
 
+/**
+ * @brief Unit tests replay header parsing
+ */
+void replay_test(void);
+
 #endif // REPLAY_H

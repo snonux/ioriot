@@ -21,6 +21,8 @@
 #define CAPTURE_VERSION 3
 /** Version of the supported .replay format */
 #define REPLAY_VERSION 2
+/** Meta header key for the supported .replay format version */
+#define REPLAY_VERSION_KEY "replay_version"
 /** Max amount of tokens per line in the .capture file */
 #define MAX_TOKENS 10
 /** Max line length in either .capture or .replay file */
