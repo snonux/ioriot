@@ -42,7 +42,7 @@ void rstats_destroy(rstats_s *s)
     free(s);
 }
 
-rworker_stats_s* rworker_stats_new_mmap(options_s *opts)
+rworker_stats_s* rworker_stats_new_mmap()
 {
     // Share this object between processes, so that the stats cann be
     // collected by the master process!
@@ -105,4 +105,3 @@ void rstats_print(rstats_s* s)
     fprintf(s->stats_fd, "\tTime ahead: %lds\n", s->time_ahead/1000);
     fprintf(s->stats_fd, "\tTotal time: %.2fs\n", s->duration);
 }
-
