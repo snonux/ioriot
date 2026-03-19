@@ -1,0 +1,55 @@
+FROM rockylinux:9
+
+ENV kernel=KERNEL
+
+RUN case "${kernel}" in \
+	*.el9*) ;; \
+	*) echo "KERNEL must be a Rocky Linux 9 kernel release, for example 5.14.0-503.35.1.el9_5.x86_64"; exit 1 ;; \
+	esac
+
+RUN set -eux; \
+	rpm --import https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux-9; \
+	printf '%s\n' \
+		'[almasnap-appstream]' \
+		'name=AlmaLinux 9 snapshot 20250416 - AppStream' \
+		'baseurl=https://linuxsoft.cern.ch/cern/alma/9-snapshots/20250416/AppStream/$basearch/os/' \
+		'enabled=1' \
+		'gpgcheck=1' \
+		'repo_gpgcheck=0' \
+		'gpgkey=https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux-9' \
+		>/etc/yum.repos.d/alma-snapshot-appstream.repo; \
+	printf '%s\n' \
+		'[almasnap-baseos-debug]' \
+		'name=AlmaLinux 9 snapshot 20250416 - BaseOS Debug' \
+		'baseurl=https://linuxsoft.cern.ch/cern/alma/9-snapshots/20250416/BaseOS/$basearch/debug/' \
+		'enabled=1' \
+		'gpgcheck=1' \
+		'repo_gpgcheck=0' \
+		'gpgkey=https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux-9' \
+		>/etc/yum.repos.d/alma-snapshot-baseos-debug.repo; \
+	dnf clean all
+
+RUN set -eux; \
+	arch="$(uname -m)"; \
+	dnf -v install -y --setopt=install_weak_deps=False \
+		dnf-plugins-core \
+		gcc \
+		make \
+		systemtap \
+		wget; \
+	dnf -v install -y --setopt=install_weak_deps=False \
+		--enablerepo=almasnap-appstream \
+		--enablerepo=almasnap-baseos-debug \
+		"kernel-devel-${kernel}" \
+		"kernel-debuginfo-${kernel}" \
+		"kernel-debuginfo-common-${arch}-${kernel}"; \
+	dnf clean all
+
+WORKDIR /ioriot
+ADD ./ /ioriot
+
+RUN mkdir -p /ioriot/systemtap/downloads
+RUN mkdir -p /opt/ioriot
+
+VOLUME /opt
+VOLUME /ioriot/systemtap/downloads
