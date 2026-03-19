@@ -121,6 +121,10 @@ void *rthread_pthread_start(void *data)
             // Make the rthread reusable, he is without any tasks
             // for some time.
             pthread_mutex_lock(&w->rthread_buffer_mutex);
+            if (rbuffer_has_next(t->tasks)) {
+                pthread_mutex_unlock(&w->rthread_buffer_mutex);
+                break;
+            }
             inserted = rbuffer_insert(w->rthread_buffer, t);
             pthread_mutex_unlock(&w->rthread_buffer_mutex);
         }
