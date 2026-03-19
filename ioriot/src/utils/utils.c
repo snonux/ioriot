@@ -17,6 +17,47 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 
+static rlim_t _limit_target(const rlim_t requested, const rlim_t hard_limit)
+{
+    if (hard_limit == RLIM_INFINITY || requested <= hard_limit)
+        return requested;
+
+    return hard_limit;
+}
+
+static void _set_limit_or_cap(const int resource, const char *label,
+                              const rlim_t requested)
+{
+    struct rlimit rl;
+
+    if (0 != getrlimit(resource, &rl)) {
+        Errno("Could not read %s limits", label);
+    }
+
+    rlim_t target = _limit_target(requested, rl.rlim_max);
+    if (target != requested) {
+        Warn("Requested %s of '%llu' exceeds hard limit '%llu', using '%llu'",
+             label,
+             (unsigned long long) requested,
+             (unsigned long long) rl.rlim_max,
+             (unsigned long long) target);
+    }
+
+    rl.rlim_cur = rl.rlim_max = target;
+    if (0 != setrlimit(resource, &rl)) {
+        Errno("Could not set %s to '%llu'!",
+              label, (unsigned long long) target)
+    }
+}
+
+static struct passwd *_lookup_user_or_null(const char *user)
+{
+    if (user == NULL)
+        return NULL;
+
+    return getpwnam(user);
+}
+
 void* notnull(void *p, char *file, int line, int count)
 {
     if (p == NULL) {
@@ -95,21 +136,15 @@ void strunquote(char *str)
 void set_limits_drop_root(const char *user)
 {
     if (getuid() == 0) {
-        struct rlimit rl;
-        rl.rlim_cur = rl.rlim_max = SET_RLIMIT_NOFILE;
-        if (0 != setrlimit(RLIMIT_NOFILE, &rl)) {
-            Errno("Could not set RLIMIT_NOFILE to '%lld'!",
-                  (long long) SET_RLIMIT_NOFILE)
-        }
-        rl.rlim_cur = rl.rlim_max = SET_RLIMIT_NPROC;
-        if (0 != setrlimit(RLIMIT_NPROC, &rl)) {
-            Errno("Could not set RLIMIT_NPROC to '%lld'!",
-                  (long long) SET_RLIMIT_NPROC)
-        }
+        _set_limit_or_cap(RLIMIT_NOFILE, "RLIMIT_NOFILE", SET_RLIMIT_NOFILE);
+        _set_limit_or_cap(RLIMIT_NPROC, "RLIMIT_NPROC", SET_RLIMIT_NPROC);
+
+        Error_if(user == NULL, "No user specified while dropping privileges");
 
         if (!Eq("root", user)) {
             Put("Dropping root privileges to user '%s'", user);
-            struct passwd *pw = getpwnam(user);
+            struct passwd *pw = _lookup_user_or_null(user);
+            Error_if(pw == NULL, "Unable to resolve user '%s'", user);
 
             /* process is running as root, drop privileges */
             if (setgid(pw->pw_gid) != 0) {
@@ -194,16 +229,25 @@ void utils_test(void)
     assert(Eq("c=2", strtok2_r(NULL, ";:,", &saveptr)));
     assert(NULL == strtok2_r(NULL, ";:,", &saveptr));
 
+    assert(_limit_target(100, 50) == 50);
+    assert(_limit_target(100, RLIM_INFINITY) == 100);
+    assert(NULL == _lookup_user_or_null("ioriot-definitely-missing-user"));
+
     if (getuid() == 0) {
-        set_limits_drop_root("nobody");
         struct rlimit rl;
+        getrlimit(RLIMIT_NOFILE, &rl);
+        rlim_t expected_nofile = _limit_target(SET_RLIMIT_NOFILE, rl.rlim_max);
+        getrlimit(RLIMIT_NPROC, &rl);
+        rlim_t expected_nproc = _limit_target(SET_RLIMIT_NPROC, rl.rlim_max);
+
+        set_limits_drop_root("nobody");
 
         getrlimit(RLIMIT_NOFILE, &rl);
-        assert(rl.rlim_cur == SET_RLIMIT_NOFILE);
-        assert(rl.rlim_max == SET_RLIMIT_NOFILE);
+        assert(rl.rlim_cur == expected_nofile);
+        assert(rl.rlim_max == expected_nofile);
 
         getrlimit(RLIMIT_NPROC, &rl);
-        assert(rl.rlim_cur == SET_RLIMIT_NPROC);
-        assert(rl.rlim_max == SET_RLIMIT_NPROC);
+        assert(rl.rlim_cur == expected_nproc);
+        assert(rl.rlim_max == expected_nproc);
     }
 }
