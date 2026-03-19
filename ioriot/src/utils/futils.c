@@ -255,6 +255,7 @@ void cache_file(const char *file)
 
     while ((read = getline(&line, &len, fd)) != -1);
     fclose(fd);
+    free(line);
 }
 
 void drop_caches(void)
