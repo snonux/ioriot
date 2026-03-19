@@ -14,61 +14,51 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script is used to capture I/O on a Linux based system in order to replay
-# the same I/O via the ioriot command line utility.
+# This script captures I/O syscalls for replay via the ioriot utility.
 #
-# The tool will generate one line per captured I/O syscall to a .capture log
-# file.
+# Updated for modern kernels (6.x+): uses tapset variable names instead of raw
+# kernel $variables, saves entry values in global arrays for use in return probes,
+# and uses "kernel" module specifier for @cast lookups.
 #
-# The key/value separator is ';:,', example line:
-#
-#   t=1509989598023;:,i=17159:17358;:,o=open;:,d=167;:,p=/tmp/test;:,f=0;:,m=438;:,
-#
-# It may be that SystemTap will skip probes or interrupts probes in case of
-# system overload. As a result we can have corrupt lines in the log. That's why
-# we use a special field separator ';:,' to detect corrupt lines more robustly.
-#
-# The line uses the following format keys (we use many different of these, the
-# only benefit over a more generic approach is to detect corrupt lines more
-# easily):
-#
-# Format keys:
-# t: Time
-# D: Duration
-# i: PID:TID (process and thread ID)
-# o: Operation name
-# O: Offset or owner/user UID
-# W: Whence
-# d: File/dir descriptor
-# p: File path
-# P: File path 2
-# f: Flags
-# m: Mode
-# b: Bytes
-# c: Count
-# s: Return status
-# t: Optional text
-# F: FCNTL command
-# G: FCNTL arg or user group UID
-# T: Optional text (debugging purpose only)
-# a: Address
-# A: Address 2
-#
+# Output format: one line per syscall with ';:,' separated key=value pairs.
+# See format key documentation in the original version.
 
 global PROBE_ENTRY_TIMES%[8096]
 
+# Global arrays to carry tapset variable values from entry to return probes.
+# Keyed by [tid(), probe_name] like PROBE_ENTRY_TIMES.
+global ENTRY_PATH%[8096]
+global ENTRY_PATH2%[8096]
+global ENTRY_FD%[8096]
+global ENTRY_FLAGS%[8096]
+global ENTRY_MODE%[8096]
+global ENTRY_OFFSET%[8096]
+global ENTRY_WHENCE%[8096]
+global ENTRY_CMD%[8096]
+global ENTRY_ARG%[8096]
+global ENTRY_COUNT%[8096]
+global ENTRY_NBYTES%[8096]
+global ENTRY_OWNER%[8096]
+global ENTRY_GROUP%[8096]
+global ENTRY_ADDR%[8096]
+global ENTRY_ADDR2%[8096]
+global ENTRY_LEN%[8096]
+global ENTRY_PROT%[8096]
+global ENTRY_PGOFF%[8096]
+global ENTRY_NEWSIZE%[8096]
+
 # Return the full qualified version of path
-function absolute_path (path) {
+function absolute_path:string (path:string) {
     # Is it already a full qualified path?
     if (substr(path,0,1) == "/") {
         return path;
     }
 
-    # Look into the in Kernel task structure to look up the corresponding
-    # mount point and directory entry...
+    # Look into the Kernel task structure to look up the corresponding
+    # mount point and directory entry, specifying "kernel" module for @cast
     tc = task_current()
-    pwd_dentry = @cast(tc, "task_struct")->fs->pwd->dentry
-    pwd_mnt = @cast(tc, "task_struct")->fs->pwd->mnt
+    pwd_dentry = @cast(tc, "task_struct", "kernel")->fs->pwd->dentry
+    pwd_mnt = @cast(tc, "task_struct", "kernel")->fs->pwd->mnt
 
     # Construct a full qualified path from it!
     return task_dentry_path(tc, pwd_dentry, pwd_mnt) . "/" . path;
@@ -83,32 +73,42 @@ probe begin {
     printf("#|capture_version=%d|\n", 3);
 }
 
+# --- open/openat ---
+# Tapset entry vars: filename_unquoted, flags, mode
 probe syscall.open, syscall.openat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = filename_unquoted
+        ENTRY_FLAGS[tid(),name] = flags
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
 probe syscall.open.return, syscall.openat.return {
     if (execname() == "java") {
         ns = gettimeofday_ns()
-        pathname = user_string(@entry($filename))
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,f=%d;:,m=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                $return,
-                absolute_path(pathname),
-                @entry($flags),
-                @entry($mode));
+                pid(), tid(), name,
+                retval,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_FLAGS[tid(),name],
+                ENTRY_MODE[tid(),name]);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
+# --- lseek ---
+# Tapset entry vars: fildes, offset, whence
 probe syscall.lseek {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fildes
+        ENTRY_OFFSET[tid(),name] = offset
+        ENTRY_WHENCE[tid(),name] = whence
     }
 }
 
@@ -117,20 +117,26 @@ probe syscall.lseek.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,O=%d;:,W=%d;:,b=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($offset),
-                @entry($whence),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_OFFSET[tid(),name],
+                ENTRY_WHENCE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_OFFSET[tid(),name]
+        delete ENTRY_WHENCE[tid(),name]
     }
 }
 
+# --- llseek ---
+# Tapset entry vars: fd, offset_high, offset_low, whence
 probe syscall.llseek {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_OFFSET[tid(),name] = (offset_high << 32 | offset_low)
+        ENTRY_WHENCE[tid(),name] = whence
     }
 }
 
@@ -139,20 +145,26 @@ probe syscall.llseek.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,O=%d;:,W=%d;:,b=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                (@entry($offset_high) << 32 | @entry($offset_low)),
-                @entry($whence),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_OFFSET[tid(),name],
+                ENTRY_WHENCE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_OFFSET[tid(),name]
+        delete ENTRY_WHENCE[tid(),name]
     }
 }
 
+# --- fcntl ---
+# Tapset entry vars: fd, cmd, arg
 probe syscall.fcntl {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_CMD[tid(),name] = cmd
+        ENTRY_ARG[tid(),name] = arg
     }
 }
 
@@ -161,42 +173,49 @@ probe syscall.fcntl.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,F=%d;:,G=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($cmd),
-                @entry($arg),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_CMD[tid(),name],
+                ENTRY_ARG[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_CMD[tid(),name]
+        delete ENTRY_ARG[tid(),name]
     }
 }
 
+# --- creat ---
+# Tapset entry vars: pathname_unquoted, mode
 probe syscall.creat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
 probe syscall.creat.return {
     if (execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,m=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                $return,
-                absolute_path(pathname),
-                @entry($mode));
+                pid(), tid(), name,
+                retval,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_MODE[tid(),name]);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
+# --- write/writev ---
+# Tapset entry vars: fd
 probe syscall.write, syscall.writev {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -205,85 +224,120 @@ probe syscall.write.return, syscall.writev.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,b=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- unlink ---
+# Tapset entry vars: pathname_unquoted
 probe syscall.unlink {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
     }
 }
 
 probe syscall.unlink.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- unlinkat ---
+# Tapset entry vars: dfd, pathname_str_unquoted, flag
 probe syscall.unlinkat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dfd
+        ENTRY_PATH[tid(),name] = pathname_str_unquoted
+        ENTRY_FLAGS[tid(),name] = flag
     }
 }
 
 probe syscall.unlinkat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($dfd),
-                absolute_path(pathname),
-                @entry($flag),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_FLAGS[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
     }
 }
 
-probe syscall.rename, syscall.renameat, syscall.renameat2 {
+# --- rename ---
+# Tapset entry vars: oldpath_unquoted, newpath_unquoted
+probe syscall.rename {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = oldpath_unquoted
+        ENTRY_PATH2[tid(),name] = newpath_unquoted
     }
 }
 
-probe syscall.rename.return, syscall.renameat.return, syscall.renameat2.return {
+probe syscall.rename.return {
     if(execname() == "java") {
-        oldname = user_string(@entry($oldname))
-        newname = user_string(@entry($newname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,P=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(oldname),
-                absolute_path(newname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path(ENTRY_PATH2[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_PATH2[tid(),name]
     }
 }
 
+# --- renameat/renameat2 ---
+# Tapset entry vars: oldname_str_unquoted, newname_str_unquoted
+probe syscall.renameat, syscall.renameat2 {
+    if (execname() == "java") {
+        PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = oldname_str_unquoted
+        ENTRY_PATH2[tid(),name] = newname_str_unquoted
+    }
+}
+
+probe syscall.renameat.return, syscall.renameat2.return {
+    if(execname() == "java") {
+        ns = gettimeofday_ns()
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,P=%s;:,s=%d;:,\n",
+                ns, ns-PROBE_ENTRY_TIMES[tid(),name],
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                absolute_path(ENTRY_PATH2[tid(),name]),
+                retval);
+        delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_PATH2[tid(),name]
+    }
+}
+
+# --- read/readv ---
+# Tapset entry vars: fd
 probe syscall.read, syscall.readv {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -292,18 +346,22 @@ probe syscall.read.return, syscall.readv.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,b=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- readahead ---
+# Tapset entry vars: fd, offset, count
 probe syscall.readahead {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_OFFSET[tid(),name] = offset
+        ENTRY_COUNT[tid(),name] = count
     }
 }
 
@@ -312,20 +370,24 @@ probe syscall.readahead.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,b=%ld;:,O=%ld;:,c=%ld\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return,
-                @entry($offset),
-                @entry($count));
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval,
+                ENTRY_OFFSET[tid(),name],
+                ENTRY_COUNT[tid(),name]);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_OFFSET[tid(),name]
+        delete ENTRY_COUNT[tid(),name]
     }
 }
 
+# --- readdir ---
+# Tapset entry vars: fd
 probe syscall.readdir {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -334,60 +396,64 @@ probe syscall.readdir.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- readlink ---
+# Tapset entry vars: path_unquoted
 probe syscall.readlink {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
     }
 }
 
 probe syscall.readlink.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($path))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- readlinkat ---
+# Tapset entry vars: path_unquoted
 probe syscall.readlinkat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
     }
 }
 
 probe syscall.readlinkat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- fdatasync/fsync ---
+# Tapset entry vars: fd
 probe syscall.fdatasync, syscall.fsync {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -396,18 +462,22 @@ probe syscall.fdatasync.return, syscall.fsync.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- sync_file_range ---
+# Tapset entry vars: fd, offset, nbytes
 probe syscall.sync_file_range {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_OFFSET[tid(),name] = offset
+        ENTRY_NBYTES[tid(),name] = nbytes
     }
 }
 
@@ -416,17 +486,19 @@ probe syscall.sync_file_range.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,O=%ld;:,b=%ld;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($offset),
-                @entry($nbytes),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_OFFSET[tid(),name],
+                ENTRY_NBYTES[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_OFFSET[tid(),name]
+        delete ENTRY_NBYTES[tid(),name]
     }
 }
 
+# --- sync ---
 probe syscall.sync {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
@@ -438,17 +510,18 @@ probe syscall.sync.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                $return);
+                pid(), tid(), name,
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
     }
 }
 
+# --- syncfs ---
+# Tapset entry vars: fd
 probe syscall.syncfs {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -457,18 +530,20 @@ probe syscall.syncfs.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- close ---
+# Tapset entry vars: fd
 probe syscall.close {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -477,18 +552,21 @@ probe syscall.close.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- getdents ---
+# Tapset entry vars: fd, count
 probe syscall.getdents {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_COUNT[tid(),name] = count
     }
 }
 
@@ -497,127 +575,141 @@ probe syscall.getdents.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,c=%d;:,b=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($count),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_COUNT[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_COUNT[tid(),name]
     }
 }
 
+# --- mkdir ---
+# Tapset entry vars: pathname_unquoted, mode
 probe syscall.mkdir {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
 probe syscall.mkdir.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,m=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                @entry($mode),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_MODE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
+# --- rmdir ---
+# Tapset entry vars: pathname_unquoted
 probe syscall.rmdir {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
     }
 }
 
 probe syscall.rmdir.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- mkdirat ---
+# Tapset entry vars: dirfd, pathname_unquoted, mode
 probe syscall.mkdirat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dirfd
+        ENTRY_PATH[tid(),name] = pathname_unquoted
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
 probe syscall.mkdirat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,p=%s;:,m=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($dfd),
-                absolute_path(pathname),
-                @entry($mode),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_MODE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
+# --- stat ---
+# Tapset entry vars: filename_unquoted
 probe syscall.stat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = filename_unquoted
     }
 }
 
 probe syscall.stat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($filename))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- statfs/statfs64 ---
+# Tapset entry vars: path_unquoted
 probe syscall.statfs, syscall.statfs64 {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
     }
 }
 
 probe syscall.statfs.return, syscall.statfs64.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($pathname))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- fstatfs/fstatfs64 ---
+# Tapset entry vars: fd
 probe syscall.fstatfs, syscall.fstatfs64 {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
     }
 }
 
@@ -626,39 +718,42 @@ probe syscall.fstatfs.return, syscall.fstatfs64.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- lstat ---
+# Tapset entry vars: path_unquoted
 probe syscall.lstat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
     }
 }
 
 probe syscall.lstat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($filename))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
     }
 }
 
+# --- fstat ---
+# Tapset entry vars: filedes
 probe syscall.fstat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = filedes
     }
 }
 
@@ -667,63 +762,99 @@ probe syscall.fstat.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
     }
 }
 
+# --- fstatat ---
+# Tapset entry vars: dirfd, path_unquoted, flags
 probe syscall.fstatat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = dirfd
+        ENTRY_PATH[tid(),name] = path_unquoted
+        ENTRY_FLAGS[tid(),name] = flags
     }
 }
 
 probe syscall.fstatat.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($filename))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%ld;:,p=%s;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($dfd),
-                absolute_path(pathname),
-                @entry($flag),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_FLAGS[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
     }
 }
 
-probe syscall.chmod, syscall.fchmodat {
+# --- chmod ---
+# Tapset entry vars: path_unquoted, mode
+probe syscall.chmod {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
-probe syscall.chmod.return, syscall.fchmodat.return {
+probe syscall.chmod.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($filename))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,m=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                @entry($mode),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_MODE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
+# --- fchmodat ---
+# Tapset entry vars: pathname_unquoted, mode
+probe syscall.fchmodat {
+    if (execname() == "java") {
+        PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
+        ENTRY_MODE[tid(),name] = mode
+    }
+}
+
+probe syscall.fchmodat.return {
+    if(execname() == "java") {
+        ns = gettimeofday_ns()
+        printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,m=%d;:,s=%d;:,\n",
+                ns, ns-PROBE_ENTRY_TIMES[tid(),name],
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_MODE[tid(),name],
+                retval);
+        delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_MODE[tid(),name]
+    }
+}
+
+# --- fchmod ---
+# Tapset entry vars: fildes, mode
 probe syscall.fchmod {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fildes
+        ENTRY_MODE[tid(),name] = mode
     }
 }
 
@@ -732,90 +863,118 @@ probe syscall.fchmod.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%d;:,m=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($mode),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_MODE[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_MODE[tid(),name]
     }
 }
 
-probe syscall.chown, syscall.chown16,
-      syscall.lchown, syscall.lchown16 {
+# --- chown/lchown ---
+# Tapset entry vars: path_unquoted, owner, group
+# Note: chown16/lchown16 do not exist on x86_64
+probe syscall.chown,
+      syscall.lchown {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = path_unquoted
+        ENTRY_OWNER[tid(),name] = owner
+        ENTRY_GROUP[tid(),name] = group
     }
 }
 
-probe syscall.chown.return, syscall.chown16.return,
-      syscall.lchown.return, syscall.lchown16.return {
+probe syscall.chown.return,
+      syscall.lchown.return {
     if(execname() == "java") {
-        pathname = user_string(@entry($filename))
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,O=%d;:,G=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                @entry($user),
-                @entry($group),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_OWNER[tid(),name],
+                ENTRY_GROUP[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_OWNER[tid(),name]
+        delete ENTRY_GROUP[tid(),name]
     }
 }
 
-probe syscall.fchown, syscall.fchown16 {
+# --- fchown ---
+# Tapset entry vars: fd, owner, group
+# Note: fchown16 does not exist on x86_64
+probe syscall.fchown {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_OWNER[tid(),name] = owner
+        ENTRY_GROUP[tid(),name] = group
     }
 }
 
-probe syscall.fchown.return, syscall.fchown16.return {
+probe syscall.fchown.return {
     if(execname() == "java") {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,d=%ld;:,O=%d;:,G=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($fd),
-                @entry($user),
-                @entry($group),
-                $return);
+                pid(), tid(), name,
+                ENTRY_FD[tid(),name],
+                ENTRY_OWNER[tid(),name],
+                ENTRY_GROUP[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_OWNER[tid(),name]
+        delete ENTRY_GROUP[tid(),name]
     }
 }
 
+# --- fchownat ---
+# Tapset entry vars: pathname_unquoted, owner, group, flags
 probe syscall.fchownat {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_PATH[tid(),name] = pathname_unquoted
+        ENTRY_OWNER[tid(),name] = owner
+        ENTRY_GROUP[tid(),name] = group
+        ENTRY_FLAGS[tid(),name] = flags
     }
 }
 
 probe syscall.fchownat.return {
-    pathname = user_string(@entry($filename))
     if(execname() == "java") {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,p=%s;:,O=%d;:,G=%d;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                absolute_path(pathname),
-                @entry($user),
-                @entry($group),
-                @entry($flag),
-                $return);
+                pid(), tid(), name,
+                absolute_path(ENTRY_PATH[tid(),name]),
+                ENTRY_OWNER[tid(),name],
+                ENTRY_GROUP[tid(),name],
+                ENTRY_FLAGS[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_PATH[tid(),name]
+        delete ENTRY_OWNER[tid(),name]
+        delete ENTRY_GROUP[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
     }
 }
 
+# --- mmap2 ---
+# Tapset entry vars: start, length, prot, flags, fd, pgoffset
 probe syscall.mmap2 {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_ADDR[tid(),name] = start
+        ENTRY_LEN[tid(),name] = length
+        ENTRY_PROT[tid(),name] = prot
+        ENTRY_FLAGS[tid(),name] = flags
+        ENTRY_FD[tid(),name] = fd
+        ENTRY_PGOFF[tid(),name] = pgoffset
     }
 }
 
@@ -824,23 +983,33 @@ probe syscall.mmap2.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,a=%ld;:,b=%ld;:,m=%d;:,f=%d;:,d=%d;:,O=%ld;:,A=%ld;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($addr),
-                @entry($len),
-                @entry($prot),
-                @entry($flags),
-                @entry($fd),
-                @entry($pgoff),
-                $return);
+                pid(), tid(), name,
+                ENTRY_ADDR[tid(),name],
+                ENTRY_LEN[tid(),name],
+                ENTRY_PROT[tid(),name],
+                ENTRY_FLAGS[tid(),name],
+                ENTRY_FD[tid(),name],
+                ENTRY_PGOFF[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
+        delete ENTRY_LEN[tid(),name]
+        delete ENTRY_PROT[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
+        delete ENTRY_FD[tid(),name]
+        delete ENTRY_PGOFF[tid(),name]
     }
 }
 
+# --- mremap ---
+# Tapset entry vars: old_address, old_size, new_size, flags, new_address
 probe syscall.mremap {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_ADDR[tid(),name] = new_address
+        ENTRY_ADDR2[tid(),name] = old_address
+        ENTRY_NEWSIZE[tid(),name] = new_size
+        ENTRY_FLAGS[tid(),name] = flags
     }
 }
 
@@ -849,21 +1018,27 @@ probe syscall.mremap.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,a=%ld;:,A=%ld;:,b=%ld;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($new_addr),
-                @entry($addr),
-                @entry($new_len),
-                @entry($flags),
-                $return);
+                pid(), tid(), name,
+                ENTRY_ADDR[tid(),name],
+                ENTRY_ADDR2[tid(),name],
+                ENTRY_NEWSIZE[tid(),name],
+                ENTRY_FLAGS[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
+        delete ENTRY_ADDR2[tid(),name]
+        delete ENTRY_NEWSIZE[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
     }
 }
 
+# --- munmap ---
+# Tapset entry vars: start, length
 probe syscall.munmap {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_ADDR[tid(),name] = start
+        ENTRY_LEN[tid(),name] = length
     }
 }
 
@@ -872,19 +1047,24 @@ probe syscall.munmap.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,a=%ld;:,b=%ld;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($addr),
-                @entry($len),
-                $return);
+                pid(), tid(), name,
+                ENTRY_ADDR[tid(),name],
+                ENTRY_LEN[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
+        delete ENTRY_LEN[tid(),name]
     }
 }
 
+# --- msync ---
+# Tapset entry vars: start, length, flags
 probe syscall.msync {
     if (execname() == "java") {
         PROBE_ENTRY_TIMES[tid(),name] = gettimeofday_ns()
+        ENTRY_ADDR[tid(),name] = start
+        ENTRY_LEN[tid(),name] = length
+        ENTRY_FLAGS[tid(),name] = flags
     }
 }
 
@@ -893,25 +1073,25 @@ probe syscall.msync.return {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,a=%ld;:,b=%ld;:,f=%d;:,s=%d;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name,
-                @entry($start),
-                @entry($len),
-                @entry($flags),
-                $return);
+                pid(), tid(), name,
+                ENTRY_ADDR[tid(),name],
+                ENTRY_LEN[tid(),name],
+                ENTRY_FLAGS[tid(),name],
+                retval);
         delete PROBE_ENTRY_TIMES[tid(),name]
+        delete ENTRY_ADDR[tid(),name]
+        delete ENTRY_LEN[tid(),name]
+        delete ENTRY_FLAGS[tid(),name]
     }
 }
 
+# --- exit_group ---
 probe syscall.exit_group {
     if(execname() == "java") {
         ns = gettimeofday_ns()
         printf("t=%ld;:,D=%ld;:,i=%d:%d;:,o=%s;:,\n",
                 ns, ns-PROBE_ENTRY_TIMES[tid(),name],
-                pid(),
-                tid(),
-                name);
+                pid(), tid(), name);
         delete PROBE_ENTRY_TIMES[tid(),name]
     }
 }
