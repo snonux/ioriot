@@ -356,6 +356,7 @@ status_e rworker_process_lines(rworker_s* w, const long num_lines)
 
 
     Put("worker(%d): All threads terminated!", w->rworker_num);
+    free(line);
     fclose(replay_fd);
 
     return SUCCESS;
