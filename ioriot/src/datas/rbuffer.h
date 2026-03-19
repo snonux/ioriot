@@ -19,6 +19,10 @@
 
 #include "../defaults.h"
 
+#if !defined(__x86_64__)
+#error "rbuffer currently relies on x86_64 memory ordering"
+#endif
+
 /**
  * @brief An atomic ring buffer data type definition
  *
