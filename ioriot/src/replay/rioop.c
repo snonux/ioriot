@@ -14,6 +14,8 @@
 
 #include "rioop.h"
 
+#include <sys/statfs.h>
+
 #include "../vfd.h"
 #include "rworker.h"
 
@@ -127,18 +129,18 @@ _rioop_find_handler(const rioop_entry_s *entries, const size_t num_entries,
 
 static const rioop_entry_s _RIOOP_HANDLERS[] = {
     {FSTAT, rioop_fstat},
-    {FSTATFS, _rioop_noop},
-    {FSTATFS64, _rioop_noop},
+    {FSTATFS, rioop_fstatfs},
+    {FSTATFS64, rioop_fstatfs},
     {FSTAT_AT, rioop_stat},
     {LSTAT, rioop_stat},
     {STAT, rioop_stat},
-    {STATFS, _rioop_noop},
-    {STATFS64, _rioop_noop},
+    {STATFS, rioop_statfs},
+    {STATFS64, rioop_statfs},
     {READ, rioop_read},
     {READV, rioop_read},
-    {READAHEAD, _rioop_noop},
-    {READLINK, _rioop_noop},
-    {READLINK_AT, _rioop_noop},
+    {READAHEAD, rioop_readahead},
+    {READLINK, rioop_readlink},
+    {READLINK_AT, rioop_readlinkat},
     {WRITE, rioop_write},
     {WRITEV, rioop_write},
     {OPEN, _rioop_open_default},
@@ -155,9 +157,9 @@ static const rioop_entry_s _RIOOP_HANDLERS[] = {
     {RMDIR, rioop_rmdir},
     {FSYNC, rioop_fsync},
     {FDATASYNC, rioop_fdatasync},
-    {SYNC, _rioop_noop},
-    {SYNCFS, _rioop_noop},
-    {SYNC_FILE_RANGE, _rioop_noop},
+    {SYNC, rioop_sync},
+    {SYNCFS, rioop_syncfs},
+    {SYNC_FILE_RANGE, rioop_sync_file_range},
     {FCNTL, rioop_fcntl},
     {GETDENTS, rioop_getdents},
     {READDIR, rioop_readdir},
@@ -184,8 +186,14 @@ void rioop_test(void)
            _rioop_open_default);
     assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, CREAT) ==
            _rioop_open_creat);
-    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READAHEAD) ==
-           _rioop_noop);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, STATFS) ==
+           rioop_statfs);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, FSTATFS) ==
+           rioop_fstatfs);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READLINK) ==
+           rioop_readlink);
+    assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, SYNCFS) ==
+           rioop_syncfs);
     assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, READDIR) ==
            rioop_readdir);
     assert(_rioop_find_handler(_RIOOP_HANDLERS, handler_count, -1) == NULL);
@@ -221,6 +229,14 @@ void rioop_fstat(rprocess_s *p, rthread_s *t, rtask_s *task)
     fstat(vfd->fd, &buf);
 }
 
+void rioop_fstatfs(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_fd(3);
+    _Init_virtfd;
+    struct statfs buf;
+    fstatfs(vfd->fd, &buf);
+}
+
 void rioop_rename(rprocess_s *p, rthread_s *t, rtask_s *task)
 {
     _Init_path(3);
@@ -237,6 +253,36 @@ void rioop_read(rprocess_s *p, rthread_s *t, rtask_s *task)
     char *buf = Calloc(bytes+1, char);
     read(vfd->fd, buf, bytes);
     free(buf);
+}
+
+void rioop_readahead(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_fd(3);
+    _Init_offset(4);
+    _Init_bytes(5);
+    _Init_virtfd;
+    readahead(vfd->fd, offset, bytes);
+}
+
+void rioop_readlink(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_path(3);
+    char buf[MAX_LINE_LEN];
+    readlink(path, buf, sizeof(buf));
+}
+
+void rioop_readlinkat(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_path(3);
+    char buf[MAX_LINE_LEN];
+    readlinkat(AT_FDCWD, path, buf, sizeof(buf));
+}
+
+void rioop_statfs(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_path(3);
+    struct statfs buf;
+    statfs(path, &buf);
 }
 
 void rioop_write(rprocess_s *p, rthread_s *t, rtask_s *task)
@@ -398,6 +444,32 @@ void rioop_fdatasync(rprocess_s *p, rthread_s *t, rtask_s *task)
     _Init_fd(3);
     _Init_virtfd;
     fdatasync(vfd->fd);
+}
+
+void rioop_sync(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    (void)p;
+    (void)t;
+    (void)task;
+    sync();
+}
+
+void rioop_syncfs(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_fd(3);
+    _Init_virtfd;
+    syncfs(vfd->fd);
+}
+
+void rioop_sync_file_range(rprocess_s *p, rthread_s *t, rtask_s *task)
+{
+    _Init_fd(3);
+    _Init_offset(4);
+    _Init_bytes(5);
+    _Init_virtfd;
+
+    // The current capture format does not preserve sync_file_range flags.
+    sync_file_range(vfd->fd, offset, bytes, 0);
 }
 
 void rioop_fcntl(rprocess_s *p, rthread_s *t, rtask_s *task)

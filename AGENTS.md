@@ -162,9 +162,8 @@ Architecture note:
 - On modern x86_64 systems, some operations may surface as modern entry points
   rather than legacy ones. For example, `open` may appear as `openat`, and
   `stat` / `lstat` may appear as `newfstatat` in `strace`.
-- Some replay entries are intentionally no-ops today: `statfs`, `fstatfs`,
-  `readahead`, `readlink`, `readlinkat`, `sync`, `syncfs`, and
-  `sync_file_range`.
+- `readdir` replay typically appears as `getdents64` in `strace`, and legacy
+  compat syscalls may replay through the closest modern libc entry point.
 
 ### 8. Initialize the replay tree
 
