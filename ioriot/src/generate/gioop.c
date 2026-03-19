@@ -612,7 +612,7 @@ status_e gioop_rmdir(gwriter_s *w, gtask_s *t, generate_s *g)
     }
 
     generate_vsize_by_path(g, t, NULL);
-    Gioop_write(MKDIR, "%s|%d|rmdir", t->path, t->status);
+    Gioop_write(RMDIR, "%s|%d|rmdir", t->path, t->status);
 
     if (t->status == 0)
         vsize_rmdir(t->vsize, t->path);
@@ -854,4 +854,3 @@ void gioop_close_all_vfd_cb(void *data, void *data2)
     Gioop_write(CLOSE, "%ld|%d|close on exit_group", t->vfd->mapped_fd, 0);
     vsize_close(t->vsize, t->vfd);
 }
-
