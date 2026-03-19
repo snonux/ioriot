@@ -7,3 +7,5 @@ ioriot/tags
 systemtap/downloads/
 docker/
 Dockerfile
+/io.capture
+/io.replay
