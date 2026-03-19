@@ -49,6 +49,16 @@ _gioop_find_handler(const gioop_entry_s *entries, const size_t num_entries,
     return NULL;
 }
 
+static int
+_gioop_creat_flags(const gtask_s *t)
+{
+    if (t->flags != -1)
+        return t->flags;
+
+    // creat(2) behaves like open(..., O_CREAT|O_WRONLY|O_TRUNC, mode).
+    return O_CREAT | O_WRONLY | O_TRUNC;
+}
+
 static const gioop_entry_s _GIOOP_PREOPEN[] = {
     {"open", gioop_open},
     {"openat", gioop_openat},
@@ -108,11 +118,14 @@ static const gioop_entry_s _GIOOP_DISPATCH[] = {
 
 void gioop_test(void)
 {
+    gtask_s task = {0};
     const size_t preopen_count = _GIOOP_ENTRY_COUNT(_GIOOP_PREOPEN);
     const size_t dispatch_count = _GIOOP_ENTRY_COUNT(_GIOOP_DISPATCH);
 
     assert(_gioop_find_handler(_GIOOP_PREOPEN, preopen_count, "open") ==
            gioop_open);
+    assert(_gioop_find_handler(_GIOOP_PREOPEN, preopen_count, "creat") ==
+           gioop_creat);
     assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, "close") ==
            gioop_close);
     assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, "msync") ==
@@ -120,6 +133,11 @@ void gioop_test(void)
     assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count, NULL) == NULL);
     assert(_gioop_find_handler(_GIOOP_DISPATCH, dispatch_count,
                                "definitely_unknown") == NULL);
+
+    task.flags = -1;
+    assert(_gioop_creat_flags(&task) == (O_CREAT | O_WRONLY | O_TRUNC));
+    task.flags = O_RDONLY;
+    assert(_gioop_creat_flags(&task) == O_RDONLY);
 }
 
 status_e gioop_run(gwriter_s *w, gtask_s *t)
@@ -210,7 +228,9 @@ status_e gioop_openat(gwriter_s *w, gtask_s *t, generate_s *g)
 
 status_e gioop_creat(gwriter_s *w, gtask_s *t, generate_s *g)
 {
-    if (!t->has_fd || t->path == NULL || t->flags == -1) {
+    int flags = _gioop_creat_flags(t);
+
+    if (!t->has_fd || t->path == NULL || t->mode == -1) {
         return ERROR;
     }
 
@@ -218,9 +238,9 @@ status_e gioop_creat(gwriter_s *w, gtask_s *t, generate_s *g)
     generate_vsize_by_path(g, t, NULL);
 
     Gioop_write(CREAT, "%ld|%s|%d|%d|creat",
-                t->mapped_fd, t->path, t->mode, t->flags);
+                t->mapped_fd, t->path, t->mode, flags);
     if (t->fd > 0)
-        vsize_open(t->vsize, t->vfd, t->path, t->flags);
+        vsize_open(t->vsize, t->vfd, t->path, flags);
 
     return SUCCESS;
 }
