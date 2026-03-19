@@ -69,7 +69,7 @@ void replay_extract_header(options_s *opts, FILE *replay_fd, long *num_vsizes,
     }
 
     if (meta_read_l(m, "num_lines", num_lines)) {
-        if (*num_fds < 0) {
+        if (*num_lines < 0) {
             Error("Overflow (too many lines in .replay)");
         }
         Put("Setting num of lines to '%ld'", *num_lines);
