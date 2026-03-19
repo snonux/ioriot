@@ -7,17 +7,19 @@ RUN case "${kernel}" in \
 	*) echo "KERNEL must be a Rocky Linux 9 kernel release, for example 5.14.0-611.36.1.el9_7.x86_64"; exit 1 ;; \
 	esac
 
-RUN dnf install -y --setopt=install_weak_deps=False \
+RUN set -eux; \
+	arch="$(uname -m)"; \
+	dnf -v install -y --setopt=install_weak_deps=False \
 		dnf-plugins-core \
 		gcc \
 		make \
 		systemtap \
-		wget && \
-	dnf config-manager --set-enabled baseos-debug && \
-	dnf install -y --setopt=install_weak_deps=False \
-		kernel-devel-${kernel} \
-		kernel-debuginfo-${kernel} \
-		kernel-debuginfo-common-$(uname -m)-${kernel} && \
+		wget; \
+	dnf -v config-manager --set-enabled baseos-debug; \
+	dnf -v install -y --setopt=install_weak_deps=False \
+		"kernel-devel-${kernel}" \
+		"kernel-debuginfo-${kernel}" \
+		"kernel-debuginfo-common-${arch}-${kernel}"; \
 	dnf clean all
 
 WORKDIR /ioriot
