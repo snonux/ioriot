@@ -41,8 +41,6 @@ void* ithread_pthread_start(void *data)
 
     while (NULL != (task = rbuffer_get_next(t->queue))) {
         ithread_run_task(t, task);
-        if (!rbuffer_insert(i->reuse_queue, task))
-            itask_destroy(task);
 
         pthread_mutex_lock(&i->reuse_queue_mutex);
         int ret = rbuffer_insert(i->reuse_queue, task);
