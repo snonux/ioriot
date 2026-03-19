@@ -55,6 +55,21 @@
     vfd_s *vfd = amap_get(p->fds_map, fd); \
     if (vfd == NULL) return
 
+static struct passwd*
+_rioop_get_pwd(const char *user, struct passwd *pwd, char *buf,
+               const size_t buf_size)
+{
+    struct passwd *result = NULL;
+
+    if (user == NULL)
+        return NULL;
+
+    if (getpwnam_r(user, pwd, buf, buf_size, &result) != 0)
+        return NULL;
+
+    return result;
+}
+
 void rioop_run(rprocess_s *p, rthread_s *t, rtask_s *task)
 {
     _Init_op(2);
@@ -411,10 +426,13 @@ void rioop_chown(rprocess_s *p, rthread_s *t, rtask_s *task)
     _Init_path(3);
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
-    struct passwd *pwd = getpwnam(opts->user);
-    if (pwd == NULL)
+    char pwd_buf[MAX_LINE_LEN];
+    struct passwd pwd;
+    struct passwd *pwd_result = _rioop_get_pwd(opts->user, &pwd, pwd_buf,
+                                               sizeof(pwd_buf));
+    if (pwd_result == NULL)
         return;
-    chown(path, pwd->pw_uid, -1);
+    chown(path, pwd_result->pw_uid, -1);
 }
 
 void rioop_fchown(rprocess_s *p, rthread_s *t, rtask_s *task)
@@ -423,10 +441,13 @@ void rioop_fchown(rprocess_s *p, rthread_s *t, rtask_s *task)
     _Init_virtfd;
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
-    struct passwd *pwd = getpwnam(opts->user);
-    if (pwd == NULL)
+    char pwd_buf[MAX_LINE_LEN];
+    struct passwd pwd;
+    struct passwd *pwd_result = _rioop_get_pwd(opts->user, &pwd, pwd_buf,
+                                               sizeof(pwd_buf));
+    if (pwd_result == NULL)
         return;
-    fchown(vfd->fd, pwd->pw_uid, -1);
+    fchown(vfd->fd, pwd_result->pw_uid, -1);
 }
 
 void rioop_lchown(rprocess_s *p, rthread_s *t, rtask_s *task)
@@ -434,8 +455,11 @@ void rioop_lchown(rprocess_s *p, rthread_s *t, rtask_s *task)
     _Init_path(3);
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
-    struct passwd *pwd = getpwnam(opts->user);
-    if (pwd == NULL)
+    char pwd_buf[MAX_LINE_LEN];
+    struct passwd pwd;
+    struct passwd *pwd_result = _rioop_get_pwd(opts->user, &pwd, pwd_buf,
+                                               sizeof(pwd_buf));
+    if (pwd_result == NULL)
         return;
-    lchown(path, pwd->pw_uid, -1);
+    lchown(path, pwd_result->pw_uid, -1);
 }
