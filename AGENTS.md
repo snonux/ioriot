@@ -1,5 +1,35 @@
 # Agent Notes
 
+## Project Overview
+
+I/O Riot captures Linux file I/O on one machine and replays the same workload
+on another machine so storage and filesystem changes can be measured against a
+real application pattern instead of a synthetic benchmark.
+
+The normal execution path is:
+
+1. capture live I/O into a `.capture` log through SystemTap probes
+2. generate a `.replay` workload and initialize the replay tree
+3. replay the workload with configurable process and thread parallelism
+4. inspect replay stats and host-level storage metrics
+
+## Architecture
+
+- `/opt/ioriot/bin/ioriot` is built from `ioriot/src/main.c` and dispatches the
+  capture, generate, init, and replay modes.
+- `systemtap/src/ioriot.stp` is the source probe set for capture. The sibling
+  files `systemtap/src/targetedioriot.stp` and `systemtap/src/javaioriot.stp`
+  are generated variants built from it by `systemtap/Makefile`.
+- `ioriot/src/generate/` parses `.capture` lines, maps real PIDs/FDs into the
+  virtual replay model, and writes `.replay` operations.
+- `ioriot/src/init/` creates the file and directory skeleton needed before
+  replay starts.
+- `ioriot/src/replay/` owns the runtime worker/process/thread engine that
+  executes replay tasks against the initialized tree.
+- `ioriot/src/datas/`, `ioriot/src/vfd.*`, and `ioriot/src/vsize.*` implement
+  the custom maps, buffers, and virtual file-size/offset tracking shared by the
+  generator and replay engine.
+
 ## Syscall Matrix End-to-End Test
 
 Use this procedure when you need a reproducible end-to-end test that exercises
