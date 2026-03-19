@@ -402,6 +402,8 @@ void rioop_chown(rprocess_s *p, rthread_s *t, rtask_s *task)
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
     struct passwd *pwd = getpwnam(opts->user);
+    if (pwd == NULL)
+        return;
     chown(path, pwd->pw_uid, -1);
 }
 
@@ -412,6 +414,8 @@ void rioop_fchown(rprocess_s *p, rthread_s *t, rtask_s *task)
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
     struct passwd *pwd = getpwnam(opts->user);
+    if (pwd == NULL)
+        return;
     fchown(vfd->fd, pwd->pw_uid, -1);
 }
 
@@ -421,6 +425,7 @@ void rioop_lchown(rprocess_s *p, rthread_s *t, rtask_s *task)
     rworker_s *w = t->worker;
     options_s *opts = w->opts;
     struct passwd *pwd = getpwnam(opts->user);
+    if (pwd == NULL)
+        return;
     lchown(path, pwd->pw_uid, -1);
 }
-
