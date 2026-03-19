@@ -34,8 +34,12 @@ status_e capture_run(options_s *opts)
     }
 
     Put("Release of currently running Kernel: %s", uts.release);
-    char modules_dir[128];
-    sprintf(modules_dir, "/opt/ioriot/systemtap/%s", uts.release);
+    char modules_dir[MAX_LINE_LEN];
+    if (snprintf(modules_dir, sizeof(modules_dir),
+                 "/opt/ioriot/systemtap/%s", uts.release)
+        >= (int) sizeof(modules_dir)) {
+        Error("Module path is too long for the capture buffer!");
+    }
     Put("Changing directory to module path: %s/", modules_dir);
 
     if (0 != chdir(modules_dir)) {
@@ -65,13 +69,21 @@ status_e capture_run(options_s *opts)
               "runtime (usually package 'systemtap-runtime') installed!");
     }
 
-    char staprun_command[128];
+    char staprun_command[MAX_LINE_LEN];
     if (opts->pid >= 0) {
-        sprintf(staprun_command, "%s %s -v -o %s -x %d", staprun_path, opts->module,
-                opts->capture_file, opts->pid);
+        if (snprintf(staprun_command, sizeof(staprun_command),
+                     "%s %s -v -o %s -x %d", staprun_path, opts->module,
+                     opts->capture_file, opts->pid)
+            >= (int) sizeof(staprun_command)) {
+            Error("staprun command is too long for the capture buffer!");
+        }
     } else {
-        sprintf(staprun_command, "%s %s -v -o %s", staprun_path, opts->module,
-                opts->capture_file);
+        if (snprintf(staprun_command, sizeof(staprun_command),
+                     "%s %s -v -o %s", staprun_path, opts->module,
+                     opts->capture_file)
+            >= (int) sizeof(staprun_command)) {
+            Error("staprun command is too long for the capture buffer!");
+        }
     }
 
     Out("NOTICE: It is good practise first to stop all processes, then to ");
