@@ -151,9 +151,6 @@ status_e gioop_run(gwriter_s *w, gtask_s *t)
     } else if (Eq(t->op, "fcntl")) {
         Cleanup(gioop_fcntl(w, t, g));
 
-    } else if (Eq(t->op, "fcntl")) {
-        Cleanup(gioop_fcntl(w, t, g));
-
     } else if (Eq(t->op, "mmap2")) {
         // Support for mmap added later
 
